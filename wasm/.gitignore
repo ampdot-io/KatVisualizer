@@ -1,0 +1,7 @@
+target/
+pkg/
+Cargo.lock
+*.wasm
+*.js
+!index.html
+node_modules/

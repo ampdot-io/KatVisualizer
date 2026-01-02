@@ -18,9 +18,9 @@ use std::{
 };
 
 use crate::{
-    AnalysisChain, AnalysisChainConfig, AnalysisMetrics, MAX_FREQUENCY_BINS,
-    MAX_OSC_FREQUENCY_BINS, MyPlugin, PluginParams, PluginStateInfo, SPECTROGRAM_SLICES,
+    AnalysisChain, AnalysisMetrics, MyPlugin, PluginParams, PluginStateInfo,
     analyzer::{BetterSpectrogram, map_value_f32},
+    common::{AnalysisChainConfig, MAX_FREQUENCY_BINS, MAX_OSC_FREQUENCY_BINS, SPECTROGRAM_SLICES},
 };
 
 fn calculate_volume_min_max(

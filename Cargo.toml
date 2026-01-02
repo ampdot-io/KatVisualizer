@@ -14,6 +14,11 @@ crate-type = [
 	"lib",
 ]
 
+[[bin]]
+name = "katvisualizer_wasm"
+path = "src/bin/katvisualizer_wasm.rs"
+required-features = ["wasm"]
+
 [features]
 default = [ "midi" ]
 force-mono = [  ]
@@ -22,24 +27,52 @@ force-mono-to-stereo = [
 ]
 mute-output = [  ]
 midi = [  ]
+wasm = []
 
-[dependencies]
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 nih_plug = { git = "https://github.com/transkatgirl/nih-plug.git", rev = "1f132feff0b03df8b5078ffaa1087201c9545d3f", features = [
 	"assert_process_allocs",
 	"standalone",
 ] }
 nih_plug_egui = { git = "https://github.com/transkatgirl/nih-plug.git", rev = "1f132feff0b03df8b5078ffaa1087201c9545d3f" }
+threadpool = "1.8.1"
+rosc = "0.11.4"
+mimalloc = { version = "0.1.48", features = [
+	"v3",
+] }
+
+[dependencies]
 serde = { version = "1.0", features = [
 	"derive",
 ] }
 color = "0.3.2"
-threadpool = "1.8.1"
 parking_lot = "0.12.5"
-mimalloc = { version = "0.1.48", features = [
-	"v3",
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+eframe = "0.27"
+cpal = { version = "0.15", features = ["wasm-bindgen"] }
+console_error_panic_hook = "0.1"
+console_log = "1.0"
+log = "0.4"
+web-time = "1.1"
+web-sys = { version = "0.3", features = [
+    "AudioContext",
+    "AudioNode",
+    "AudioDestinationNode",
+    "Window",
+    "Navigator",
+    "MediaDevices",
+    "MediaStream",
+    "AudioContextOptions",
+    "MediaStreamAudioSourceNode",
+    "ScriptProcessorNode",
+    "AudioWorklet",
+    "AudioWorkletNode",
+    "MessageEvent",
+    "console",
 ] }
-voracious_radix_sort = "1.2.0"
-rosc = "0.11.4"
 
 [profile.dev]
 opt-level = 3

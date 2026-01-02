@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WASM Test Suite</title>
+    <style>
+        body {
+            font-family: monospace;
+            background: #1a1a1a;
+            color: #0f0;
+            padding: 20px;
+        }
+        .test { margin: 10px 0; }
+        .pass { color: #0f0; }
+        .fail { color: #f00; }
+        pre { background: #000; padding: 10px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>KatVisualizer WASM Test Suite</h1>
+    <div id="results"></div>
+
+    <script type="module">
+        import init, { MusicVisualizer } from './pkg/katvisualizer_wasm.js';
+
+        const results = document.getElementById('results');
+
+        function log(msg, isError = false) {
+            const div = document.createElement('div');
+            div.className = 'test ' + (isError ? 'fail' : 'pass');
+            div.textContent = (isError ? '✗' : '✓') + ' ' + msg;
+            results.appendChild(div);
+        }
+
+        function logData(label, data) {
+            const pre = document.createElement('pre');
+            pre.textContent = label + ':\n' + JSON.stringify(data, null, 2);
+            results.appendChild(pre);
+        }
+
+        async function runTests() {
+            try {
+                // Test 1: WASM module loads
+                log('Loading WASM module...');
+                await init();
+                log('WASM module loaded successfully');
+
+                // Test 2: Create visualizer instance
+                log('Creating MusicVisualizer instance...');
+                const viz = new MusicVisualizer(128, 48000);
+                log('MusicVisualizer created');
+
+                // Test 3: Get frequencies
+                log('Getting frequency bins...');
+                const freqs = viz.get_frequencies();
+                log(`Got ${freqs.length} frequency bins`);
+                logData('First 10 frequencies (Hz)', freqs.slice(0, 10));
+                logData('Last 10 frequencies (Hz)', freqs.slice(-10));
+
+                if (freqs.length !== 128) {
+                    log(`ERROR: Expected 128 bins, got ${freqs.length}`, true);
+                }
+
+                // Test 4: Verify frequency range
+                const minFreq = Math.min(...freqs);
+                const maxFreq = Math.max(...freqs);
+                log(`Frequency range: ${minFreq.toFixed(1)} Hz to ${maxFreq.toFixed(1)} Hz`);
+
+                if (minFreq < 15 || minFreq > 25) {
+                    log(`WARNING: Min frequency ${minFreq} Hz outside expected range (20 Hz)`, true);
+                }
+                if (maxFreq < 15000 || maxFreq > 25000) {
+                    log(`WARNING: Max frequency ${maxFreq} Hz outside expected range (20000 Hz)`, true);
+                }
+
+                // Test 5: Analyze silence
+                log('Testing analysis with silence...');
+                const silenceSamples = new Float32Array(4096).fill(0);
+                const silenceResult = viz.analyze(silenceSamples);
+                log(`Silence analysis returned ${silenceResult.length} values`);
+
+                if (silenceResult.length !== 256) { // 128 bins * 2 (pan + value)
+                    log(`ERROR: Expected 256 values (128 bins * 2), got ${silenceResult.length}`, true);
+                }
+
+                const silenceMax = Math.max(...silenceResult.filter((_, i) => i % 2 === 1));
+                log(`Max value in silence: ${silenceMax}`);
+                if (silenceMax > 0.1) {
+                    log('WARNING: Silence has unexpected non-zero values', true);
+                }
+
+                // Test 6: Analyze sine wave at 440 Hz
+                log('Testing analysis with 440 Hz sine wave...');
+                const sampleRate = 48000;
+                const freq440 = 440;
+                const sineSamples = new Float32Array(4096);
+                for (let i = 0; i < sineSamples.length; i++) {
+                    sineSamples[i] = Math.sin(2 * Math.PI * freq440 * i / sampleRate) * 0.5;
+                }
+
+                const sineResult = viz.analyze(sineSamples);
+                log(`Sine wave analysis returned ${sineResult.length} values`);
+
+                // Find peak bin
+                let peakBin = -1;
+                let peakValue = 0;
+                for (let i = 0; i < sineResult.length / 2; i++) {
+                    const value = sineResult[i * 2 + 1];
+                    if (value > peakValue) {
+                        peakValue = value;
+                        peakBin = i;
+                    }
+                }
+
+                const peakFreq = freqs[peakBin];
+                log(`Peak at bin ${peakBin}: ${peakFreq.toFixed(1)} Hz with value ${peakValue.toFixed(3)}`);
+
+                const freqError = Math.abs(peakFreq - 440);
+                if (freqError > 50) {
+                    log(`WARNING: Peak frequency ${peakFreq.toFixed(1)} Hz far from expected 440 Hz (error: ${freqError.toFixed(1)} Hz)`, true);
+                } else {
+                    log(`Peak frequency within acceptable range (error: ${freqError.toFixed(1)} Hz)`);
+                }
+
+                if (peakValue < 0.01) {
+                    log('ERROR: Peak value too low, signal not detected', true);
+                } else {
+                    log(`Signal detected with strength ${peakValue.toFixed(3)}`);
+                }
+
+                // Test 7: Analyze multi-frequency signal
+                log('Testing analysis with 220 Hz + 880 Hz mix...');
+                const mixSamples = new Float32Array(4096);
+                for (let i = 0; i < mixSamples.length; i++) {
+                    mixSamples[i] = (
+                        Math.sin(2 * Math.PI * 220 * i / sampleRate) * 0.3 +
+                        Math.sin(2 * Math.PI * 880 * i / sampleRate) * 0.3
+                    );
+                }
+
+                const mixResult = viz.analyze(mixSamples);
+
+                // Find peaks
+                const peaks = [];
+                for (let i = 0; i < mixResult.length / 2; i++) {
+                    const value = mixResult[i * 2 + 1];
+                    if (value > 0.1) {
+                        peaks.push({ bin: i, freq: freqs[i], value });
+                    }
+                }
+
+                peaks.sort((a, b) => b.value - a.value);
+                log(`Found ${peaks.length} significant peaks`);
+                logData('Top 5 peaks', peaks.slice(0, 5).map(p => ({
+                    freq: p.freq.toFixed(1) + ' Hz',
+                    value: p.value.toFixed(3)
+                })));
+
+                // Test 8: Gain control
+                log('Testing gain control...');
+                viz.set_gain(20.0);
+                const gainResult = viz.analyze(sineSamples);
+                const gainPeakValue = Math.max(...gainResult.filter((_, i) => i % 2 === 1));
+                log(`Peak value with +20dB gain: ${gainPeakValue.toFixed(3)}`);
+
+                viz.set_gain(0.0); // Reset
+
+                // Test 9: Different resolutions
+                log('Testing different resolutions...');
+                for (const res of [64, 256, 512]) {
+                    const testViz = new MusicVisualizer(res, 48000);
+                    const testFreqs = testViz.get_frequencies();
+                    const testResult = testViz.analyze(sineSamples);
+                    log(`Resolution ${res}: ${testFreqs.length} bins, ${testResult.length} values`);
+                }
+
+                // Test 10: Memory stability
+                log('Testing memory stability (100 iterations)...');
+                for (let i = 0; i < 100; i++) {
+                    viz.analyze(sineSamples);
+                }
+                log('Memory stability test completed');
+
+                log('\n=== All tests completed ===');
+
+            } catch (err) {
+                log('FATAL ERROR: ' + err.message, true);
+                console.error(err);
+                logData('Error details', {
+                    message: err.message,
+                    stack: err.stack
+                });
+            }
+        }
+
+        runTests();
+    </script>
+</body>
+</html>

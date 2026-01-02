@@ -14,13 +14,16 @@ A realtime music visualizer ported to WebAssembly. This is a web version of KatV
 
 ### Prerequisites
 
-- Rust toolchain (install from https://rustup.rs/)
+- Rust toolchain with rustup (install from https://rustup.rs/)
+  - **Important**: Use rustup, not Homebrew Rust
+  - Add wasm32 target: `rustup target add wasm32-unknown-unknown`
 - wasm-pack (will be auto-installed by build script)
 
 ### Build Steps
 
 1. Run the build script:
 ```bash
+cd wasm
 chmod +x build.sh
 ./build.sh
 ```
@@ -30,14 +33,28 @@ chmod +x build.sh
 python3 -m http.server 8080
 ```
 
-3. Open http://localhost:8080 in your browser
+3. Run tests and verify functionality:
+   - Open http://localhost:8080/test.html - automated test suite
+   - Open http://localhost:8080/debug.html - interactive debug viewer
+   - Open http://localhost:8080/index.html - full application
 
 ### Manual Build
 
 ```bash
 cargo install wasm-pack
+rustup target add wasm32-unknown-unknown
 wasm-pack build --target web --out-dir pkg
 ```
+
+## Testing
+
+See [TESTING.md](TESTING.md) for detailed testing instructions.
+
+Quick test:
+1. Build the project
+2. Serve with `python3 -m http.server 8080`
+3. Open http://localhost:8080/test.html
+4. All tests should pass (green checkmarks)
 
 ## Usage
 

@@ -4,8 +4,6 @@ use std::f64::consts::PI;
 #[wasm_bindgen]
 pub struct MusicVisualizer {
     analyzer: BetterAnalyzer,
-    spectrogram: Vec<Vec<(f32, f32)>>,  // Rolling buffer of spectrum slices
-    max_slices: usize,
     gain: f64,
     listening_volume: Option<f64>,
 }
@@ -32,8 +30,6 @@ impl MusicVisualizer {
 
         Self {
             analyzer: BetterAnalyzer::new(config),
-            spectrogram: Vec::new(),
-            max_slices: 512,
             gain: 0.0,
             listening_volume: Some(86.0),
         }
@@ -47,18 +43,20 @@ impl MusicVisualizer {
         let spectrum = self.analyzer.raw_analysis();
 
         let mut result = Vec::with_capacity(spectrum.len() * 2);
+        let gain_linear = dbfs_to_amplitude(self.gain);
+
         for &amp in spectrum {
-            let vol = if amp.is_finite() {
-                amplitude_to_dbfs(amp * 2.0) + self.gain
+            // Convert amplitude to dB with gain applied
+            let amp_with_gain = amp * 2.0 * gain_linear;
+            let vol_db = if amp_with_gain > 0.0 {
+                amplitude_to_dbfs(amp_with_gain)
             } else {
                 -100.0
             };
 
-            let normalized = if let Some(lv) = self.listening_volume {
-                ((vol + 86.0 - lv).max(-60.0) / 60.0).max(0.0).min(1.0) as f32
-            } else {
-                ((vol + 100.0) / 100.0).max(0.0).min(1.0) as f32
-            };
+            // Normalize to 0.0-1.0 range
+            // Expected range is roughly -80 dB to +20 dB
+            let normalized = ((vol_db + 80.0) / 100.0).max(0.0).min(1.0) as f32;
 
             result.push(0.0);  // pan (mono for now)
             result.push(normalized);
@@ -162,13 +160,13 @@ impl BetterAnalyzer {
         &self.frequency_bands
     }
 
-    fn analyze(&mut self, samples: impl Iterator<Item = f64>, _listening_volume: Option<f64>) {
+    fn analyze(&mut self, samples: impl Iterator<Item = f64>, listening_volume: Option<f64>) {
         self.transform.analyze(samples);
 
         if self.config.masking {
             self.masker.calculate_masking_threshold(
                 self.transform.spectrum_data.iter().copied(),
-                _listening_volume,
+                listening_volume,
                 &mut self.masking,
             );
             self.transform
@@ -258,7 +256,8 @@ const HANN_WINDOW: &[f64] = &[1.0, 0.5];
 #[derive(Clone)]
 struct VQsDFT {
     coeffs: Vec<VQsDFTCoeffs>,
-    gains: Vec<f64>,
+    #[allow(dead_code)]
+    gains: Vec<f64>,  // Used in non-NC method (not implemented in WASM version)
     buffer: Vec<f64>,
     buffer_index: usize,
     spectrum_data: Vec<f64>,
@@ -399,7 +398,7 @@ impl VQsDFT {
 
                     let period = coeffs.period;
 
-                    for (coeff, &gain) in coeffs.kernel.iter_mut().zip(self.gains.iter()) {
+                    for coeff in coeffs.kernel.iter_mut() {
                         let comb_x = latest * coeff.fiddle.0 - oldest;
                         let comb_y = latest * coeff.fiddle.1;
 

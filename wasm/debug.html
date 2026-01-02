@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WASM Debug Viewer</title>
+    <style>
+        body {
+            font-family: monospace;
+            background: #1a1a1a;
+            color: #0f0;
+            padding: 20px;
+        }
+        #canvas {
+            border: 1px solid #333;
+            background: #000;
+            display: block;
+            margin: 20px 0;
+        }
+        button {
+            background: #333;
+            color: #0f0;
+            border: 1px solid #0f0;
+            padding: 10px 20px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover { background: #444; }
+        pre {
+            background: #000;
+            padding: 10px;
+            overflow-x: auto;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>WASM Debug Viewer</h1>
+    <button id="startBtn">Start</button>
+    <button id="testSineBtn">Test 440 Hz Sine</button>
+    <button id="testSilenceBtn">Test Silence</button>
+
+    <canvas id="canvas" width="1200" height="400"></canvas>
+
+    <h3>Debug Output</h3>
+    <pre id="debug"></pre>
+
+    <script type="module">
+        import init, { MusicVisualizer } from './pkg/katvisualizer_wasm.js';
+
+        let audioContext;
+        let analyserNode;
+        let visualizer;
+        let animationId;
+
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const debug = document.getElementById('debug');
+
+        function log(msg) {
+            debug.textContent += msg + '\n';
+            debug.scrollTop = debug.scrollHeight;
+            console.log(msg);
+        }
+
+        async function setup() {
+            await init();
+            log('WASM loaded');
+
+            visualizer = new MusicVisualizer(256, 48000);
+            log(`Created visualizer with ${visualizer.get_frequency_count()} bins`);
+
+            const freqs = visualizer.get_frequencies();
+            log(`Frequency range: ${freqs[0].toFixed(1)} - ${freqs[freqs.length-1].toFixed(1)} Hz`);
+        }
+
+        function testSine() {
+            log('\n=== Testing 440 Hz Sine Wave ===');
+            const samples = new Float32Array(4096);
+            for (let i = 0; i < samples.length; i++) {
+                samples[i] = Math.sin(2 * Math.PI * 440 * i / 48000) * 0.5;
+            }
+
+            const result = visualizer.analyze(samples);
+            const freqs = visualizer.get_frequencies();
+
+            // Find peak
+            let peakBin = 0;
+            let peakVal = 0;
+            for (let i = 0; i < result.length / 2; i++) {
+                const val = result[i * 2 + 1];
+                if (val > peakVal) {
+                    peakVal = val;
+                    peakBin = i;
+                }
+            }
+
+            log(`Peak: bin ${peakBin}, ${freqs[peakBin].toFixed(1)} Hz, value ${peakVal.toFixed(4)}`);
+
+            // Show distribution
+            let nonZeroCount = 0;
+            for (let i = 0; i < result.length / 2; i++) {
+                if (result[i * 2 + 1] > 0.01) nonZeroCount++;
+            }
+            log(`Non-zero bins: ${nonZeroCount}`);
+
+            draw(result, freqs);
+        }
+
+        function testSilence() {
+            log('\n=== Testing Silence ===');
+            const samples = new Float32Array(4096).fill(0);
+            const result = visualizer.analyze(samples);
+
+            const max = Math.max(...result.filter((_, i) => i % 2 === 1));
+            log(`Max value: ${max.toFixed(6)}`);
+
+            draw(result, visualizer.get_frequencies());
+        }
+
+        function draw(spectrum, frequencies) {
+            const w = canvas.width;
+            const h = canvas.height;
+            const bins = spectrum.length / 2;
+
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, w, h);
+
+            const barWidth = w / bins;
+
+            // Draw bars
+            for (let i = 0; i < bins; i++) {
+                const value = spectrum[i * 2 + 1];
+                const freq = frequencies[i];
+
+                const hue = Math.log2(freq / 20) / Math.log2(20000 / 20) * 360;
+                const brightness = 30 + value * 70;
+                ctx.fillStyle = `hsl(${hue}, 100%, ${brightness}%)`;
+
+                const barHeight = value * h;
+                const x = i * barWidth;
+                const y = h - barHeight;
+
+                ctx.fillRect(x, y, barWidth - 1, barHeight);
+            }
+
+            // Draw labels
+            ctx.fillStyle = '#0f0';
+            ctx.font = '10px monospace';
+            const labels = [20, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
+            labels.forEach(targetFreq => {
+                let closestIdx = 0;
+                let closestDiff = Infinity;
+                for (let i = 0; i < bins; i++) {
+                    const diff = Math.abs(frequencies[i] - targetFreq);
+                    if (diff < closestDiff) {
+                        closestDiff = diff;
+                        closestIdx = i;
+                    }
+                }
+                const x = closestIdx * barWidth;
+                const label = targetFreq >= 1000 ? (targetFreq/1000)+'k' : targetFreq;
+                ctx.fillText(label, x + 2, h - 5);
+            });
+        }
+
+        async function startMic() {
+            try {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const source = audioContext.createMediaStreamSource(stream);
+
+                analyserNode = audioContext.createAnalyser();
+                analyserNode.fftSize = 4096;
+                analyserNode.smoothingTimeConstant = 0;
+
+                source.connect(analyserNode);
+
+                log('Microphone started');
+
+                function animate() {
+                    animationId = requestAnimationFrame(animate);
+
+                    const buffer = new Float32Array(analyserNode.fftSize);
+                    analyserNode.getFloatTimeDomainData(buffer);
+
+                    const result = visualizer.analyze(buffer);
+                    draw(result, visualizer.get_frequencies());
+                }
+                animate();
+            } catch (err) {
+                log('Error: ' + err.message);
+            }
+        }
+
+        document.getElementById('startBtn').addEventListener('click', startMic);
+        document.getElementById('testSineBtn').addEventListener('click', testSine);
+        document.getElementById('testSilenceBtn').addEventListener('click', testSilence);
+
+        setup();
+    </script>
+</body>
+</html>

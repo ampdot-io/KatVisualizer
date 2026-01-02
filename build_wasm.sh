@@ -12,8 +12,15 @@ fi
 echo "Building WASM binary..."
 cargo build --release --target wasm32-unknown-unknown --bin katvisualizer_wasm --features wasm --no-default-features
 
+# Prepare dist directory
+rm -rf dist
+mkdir -p dist
+
 # Generate JS bindings
 echo "Generating bindings..."
-wasm-bindgen target/wasm32-unknown-unknown/release/katvisualizer_wasm.wasm --out-dir . --target web
+wasm-bindgen target/wasm32-unknown-unknown/release/katvisualizer_wasm.wasm --out-dir dist --target web
 
-echo "Build complete. Serve the directory with a web server."
+# Copy index.html
+cp index.html dist/
+
+echo "Build complete. Serve the 'dist' directory with a web server."

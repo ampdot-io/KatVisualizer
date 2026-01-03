@@ -1,18 +1,23 @@
 #[cfg(target_arch = "wasm32")]
 mod wasm_app {
-    use std::sync::Arc;
-    use std::time::{Duration};
-    use web_time::Instant;
-    use parking_lot::{RwLock, Mutex};
-    use eframe::wasm_bindgen::prelude::*;
+    use eframe::egui::{
+        self, ColorImage, ImageData, TextureFilter, TextureOptions, TextureWrapMode,
+    };
     use eframe::wasm_bindgen::JsCast;
-    use eframe::{WebOptions};
-    use eframe::egui;
-    use katvisualizer::analyzer::{BetterAnalyzer, BetterAnalyzerConfiguration, BetterSpectrogram, AnalysisChainConfig};
-    use katvisualizer::common::{RenderSettings, ColorTable, SPECTROGRAM_SLICES, MAX_FREQUENCY_BINS};
+    use eframe::wasm_bindgen::prelude::*;
+    use katvisualizer::analyzer::{
+        AnalysisChainConfig, BetterAnalyzer, BetterAnalyzerConfiguration, BetterSpectrogram,
+    };
+    use katvisualizer::common::{
+        ColorTable, MAX_FREQUENCY_BINS, RenderSettings, SPECTROGRAM_SLICES,
+    };
     use katvisualizer::ui::{SharedState, draw_ui};
-    use std::sync::mpsc::{channel, Receiver, Sender};
+    use parking_lot::{Mutex, RwLock};
+    use std::sync::Arc;
+    use std::sync::mpsc::{Receiver, Sender, channel};
+    use std::time::Duration;
     use wasm_bindgen_futures::JsFuture;
+    use web_time::Instant;
 
     struct AudioState {
         context: Option<web_sys::AudioContext>,
@@ -41,10 +46,10 @@ mod wasm_app {
     }
 
     impl WebVisualizer {
-        pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-             let settings = RenderSettings::default();
-             let mut color_table = ColorTable::new();
-             color_table.build(
+        pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+            let settings = RenderSettings::default();
+            let mut color_table = ColorTable::new();
+            color_table.build(
                 settings.left_hue,
                 settings.right_hue,
                 settings.minimum_lightness,
@@ -55,21 +60,25 @@ mod wasm_app {
             let analysis_config = AnalysisChainConfig::default();
 
             let analyzer_config = BetterAnalyzerConfiguration {
-                 resolution: analysis_config.resolution,
-                 start_frequency: analysis_config.start_frequency,
-                 end_frequency: analysis_config.end_frequency,
-                 erb_frequency_scale: analysis_config.erb_frequency_scale,
-                 sample_rate: 44100.0,
-                 erb_time_resolution: analysis_config.erb_time_resolution,
-                 erb_bandwidth_divisor: analysis_config.erb_bandwidth_divisor,
-                 time_resolution_clamp: analysis_config.time_resolution_clamp,
-                 q_time_resolution: analysis_config.q_time_resolution,
-                 nc_method: analysis_config.nc_method,
-                 masking: analysis_config.masking,
+                resolution: analysis_config.resolution,
+                start_frequency: analysis_config.start_frequency,
+                end_frequency: analysis_config.end_frequency,
+                erb_frequency_scale: analysis_config.erb_frequency_scale,
+                sample_rate: 44100.0,
+                erb_time_resolution: analysis_config.erb_time_resolution,
+                erb_bandwidth_divisor: analysis_config.erb_bandwidth_divisor,
+                time_resolution_clamp: analysis_config.time_resolution_clamp,
+                q_time_resolution: analysis_config.q_time_resolution,
+                nc_method: analysis_config.nc_method,
+                masking: analysis_config.masking,
             };
 
             let analyzer = BetterAnalyzer::new(analyzer_config);
-            let frequencies = analyzer.frequencies().iter().map(|(a,b,c)| (*a as f32, *b as f32, *c as f32)).collect();
+            let frequencies = analyzer
+                .frequencies()
+                .iter()
+                .map(|(a, b, c)| (*a as f32, *b as f32, *c as f32))
+                .collect();
 
             let shared_state = SharedState {
                 settings: RwLock::new(settings),
@@ -79,12 +88,43 @@ mod wasm_app {
                 spectrogram_texture: Arc::new(RwLock::new(None)),
             };
 
+            let texture_id = {
+                let tex_manager = cc.egui_ctx.tex_manager();
+                let mut manager = tex_manager.write();
+                manager.alloc(
+                    "spectrogram".to_string(),
+                    ImageData::Color(Arc::new(ColorImage::filled(
+                        [1, 1],
+                        egui::Color32::TRANSPARENT,
+                    ))),
+                    TextureOptions {
+                        magnification: TextureFilter::Nearest,
+                        minification: TextureFilter::Linear,
+                        wrap_mode: TextureWrapMode::ClampToEdge,
+                        mipmap_mode: None,
+                    },
+                )
+            };
+
+            {
+                let mut texture = shared_state.spectrogram_texture.write();
+                *texture = Some(texture_id);
+            }
+
+            cc.egui_ctx.tessellation_options_mut(|options| {
+                options.coarse_tessellation_culling = false;
+            });
+            cc.egui_ctx.set_theme(egui::Theme::Dark);
+
             let (config_tx, config_rx) = channel();
 
             Self {
                 shared_state,
                 analyzer: Arc::new(Mutex::new(analyzer)),
-                spectrogram: Arc::new(RwLock::new(BetterSpectrogram::new(SPECTROGRAM_SLICES, MAX_FREQUENCY_BINS))),
+                spectrogram: Arc::new(RwLock::new(BetterSpectrogram::new(
+                    SPECTROGRAM_SLICES,
+                    MAX_FREQUENCY_BINS,
+                ))),
                 analysis_config,
                 frequencies,
                 audio_state_container: None,
@@ -96,25 +136,25 @@ mod wasm_app {
         }
 
         fn update_analyzer(&mut self) {
-             let current_sample_rate = self.analyzer.lock().config().sample_rate;
+            let current_sample_rate = self.analyzer.lock().config().sample_rate;
 
-             let analyzer_config = BetterAnalyzerConfiguration {
-                 resolution: self.analysis_config.resolution,
-                 start_frequency: self.analysis_config.start_frequency,
-                 end_frequency: self.analysis_config.end_frequency,
-                 erb_frequency_scale: self.analysis_config.erb_frequency_scale,
-                 sample_rate: current_sample_rate,
-                 erb_time_resolution: self.analysis_config.erb_time_resolution,
-                 erb_bandwidth_divisor: self.analysis_config.erb_bandwidth_divisor,
-                 time_resolution_clamp: self.analysis_config.time_resolution_clamp,
-                 q_time_resolution: self.analysis_config.q_time_resolution,
-                 nc_method: self.analysis_config.nc_method,
-                 masking: self.analysis_config.masking,
+            let analyzer_config = BetterAnalyzerConfiguration {
+                resolution: self.analysis_config.resolution,
+                start_frequency: self.analysis_config.start_frequency,
+                end_frequency: self.analysis_config.end_frequency,
+                erb_frequency_scale: self.analysis_config.erb_frequency_scale,
+                sample_rate: current_sample_rate,
+                erb_time_resolution: self.analysis_config.erb_time_resolution,
+                erb_bandwidth_divisor: self.analysis_config.erb_bandwidth_divisor,
+                time_resolution_clamp: self.analysis_config.time_resolution_clamp,
+                q_time_resolution: self.analysis_config.q_time_resolution,
+                nc_method: self.analysis_config.nc_method,
+                masking: self.analysis_config.masking,
             };
 
             let mut analyzer = self.analyzer.lock();
             let old_config = analyzer.config();
-             if old_config.resolution != analyzer_config.resolution
+            if old_config.resolution != analyzer_config.resolution
                 || old_config.start_frequency != analyzer_config.start_frequency
                 || old_config.end_frequency != analyzer_config.end_frequency
                 || old_config.erb_frequency_scale != analyzer_config.erb_frequency_scale
@@ -126,8 +166,12 @@ mod wasm_app {
                 || old_config.masking != analyzer_config.masking
                 || old_config.sample_rate != analyzer_config.sample_rate
             {
-                 *analyzer = BetterAnalyzer::new(analyzer_config);
-                 self.frequencies = analyzer.frequencies().iter().map(|(a,b,c)| (*a as f32, *b as f32, *c as f32)).collect();
+                *analyzer = BetterAnalyzer::new(analyzer_config);
+                self.frequencies = analyzer
+                    .frequencies()
+                    .iter()
+                    .map(|(a, b, c)| (*a as f32, *b as f32, *c as f32))
+                    .collect();
             }
         }
 
@@ -187,7 +231,11 @@ mod wasm_app {
                     log::info!("Updating analyzer sample rate to {}", context.sample_rate());
                     config.sample_rate = context.sample_rate();
                     *analyzer = BetterAnalyzer::new(config);
-                    self.frequencies = analyzer.frequencies().iter().map(|(a,b,c)| (*a as f32, *b as f32, *c as f32)).collect();
+                    self.frequencies = analyzer
+                        .frequencies()
+                        .iter()
+                        .map(|(a, b, c)| (*a as f32, *b as f32, *c as f32))
+                        .collect();
                 }
             }
 
@@ -205,7 +253,14 @@ mod wasm_app {
                 oscillator.set_type(web_sys::OscillatorType::Sine);
                 oscillator.frequency().set_value(440.0);
 
-                start_processing(container.clone(), Some(oscillator), None, analyzer, spectrogram, config);
+                start_processing(
+                    container.clone(),
+                    Some(oscillator),
+                    None,
+                    analyzer,
+                    spectrogram,
+                    config,
+                );
             }
         }
 
@@ -226,11 +281,20 @@ mod wasm_app {
                         }
                     };
 
-                    let decoded_res = JsFuture::from(context_handle.decode_audio_data(&array_buffer).unwrap()).await;
+                    let decoded_res =
+                        JsFuture::from(context_handle.decode_audio_data(&array_buffer).unwrap())
+                            .await;
 
                     if let Ok(decoded) = decoded_res {
                         let buffer: web_sys::AudioBuffer = decoded.into();
-                        start_processing(container, None, Some(buffer), analyzer, spectrogram, config);
+                        start_processing(
+                            container,
+                            None,
+                            Some(buffer),
+                            analyzer,
+                            spectrogram,
+                            config,
+                        );
                     } else {
                         log::error!("Failed to decode audio");
                     }
@@ -243,32 +307,32 @@ mod wasm_app {
         fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
             ctx.request_repaint();
 
-             while let Ok(new_config) = self.config_rx.try_recv() {
-                 self.analysis_config = new_config;
-                 self.update_analyzer();
-             }
+            while let Ok(new_config) = self.config_rx.try_recv() {
+                self.analysis_config = new_config;
+                self.update_analyzer();
+            }
 
-             // Update status
-             if let Some(container) = &self.audio_state_container {
-                 let state = container.borrow();
-                 if let Some(ctx) = &state.context {
-                     self.last_audio_state = format!("{:?}", ctx.state());
-                     self.last_sample_rate = ctx.sample_rate();
-                 }
-             }
+            // Update status
+            if let Some(container) = &self.audio_state_container {
+                let state = container.borrow();
+                if let Some(ctx) = &state.context {
+                    self.last_audio_state = format!("{:?}", ctx.state());
+                    self.last_sample_rate = ctx.sample_rate();
+                }
+            }
 
-             egui::CentralPanel::default().show(ctx, |ui| {
+            egui::CentralPanel::default().show(ctx, |ui| {
                 if !ctx.input(|i| i.raw.dropped_files.is_empty()) {
-                     let dropped_files = ctx.input(|i| i.raw.dropped_files.clone());
-                     for file in dropped_files {
-                         if let Some(bytes) = file.bytes {
-                             self.load_audio(bytes.to_vec());
-                         }
-                     }
+                    let dropped_files = ctx.input(|i| i.raw.dropped_files.clone());
+                    for file in dropped_files {
+                        if let Some(bytes) = file.bytes {
+                            self.load_audio(bytes.to_vec());
+                        }
+                    }
                 }
 
                 if self.audio_state_container.is_none() {
-                     ui.centered_and_justified(|ui| {
+                    ui.centered_and_justified(|ui| {
                         ui.vertical_centered(|ui| {
                             ui.heading("Drag and drop audio file here");
                             if ui.button("Play 440Hz Test Tone").clicked() {
@@ -279,7 +343,8 @@ mod wasm_app {
                 } else {
                     // Debug Overlay
                     ui.scope(|ui| {
-                        ui.style_mut().visuals.widgets.noninteractive.bg_fill = egui::Color32::from_black_alpha(128);
+                        ui.style_mut().visuals.widgets.noninteractive.bg_fill =
+                            egui::Color32::from_black_alpha(128);
                         let frame = egui::Frame::window(ui.style());
                         frame.show(ui, |ui| {
                             ui.label(format!("Audio: {}", self.last_audio_state));
@@ -306,10 +371,10 @@ mod wasm_app {
                         let _ = tx_clone.send(settings.clone());
                     },
                     move |settings| {
-                         let _ = tx_clone2.send(settings.clone());
-                    }
+                        let _ = tx_clone2.send(settings.clone());
+                    },
                 );
-             });
+            });
         }
     }
 
@@ -319,11 +384,13 @@ mod wasm_app {
         buffer: Option<web_sys::AudioBuffer>,
         analyzer: Arc<Mutex<BetterAnalyzer>>,
         spectrogram: Arc<RwLock<BetterSpectrogram>>,
-        config: AnalysisChainConfig
+        config: AnalysisChainConfig,
     ) {
         let context = {
             let state = state_container.borrow();
-            if state.context.is_none() { return; }
+            if state.context.is_none() {
+                return;
+            }
             state.context.as_ref().unwrap().clone()
         };
 
@@ -346,41 +413,51 @@ mod wasm_app {
         let buffer_size = 2048;
         let processor_res = context.create_script_processor_with_buffer_size_and_number_of_input_channels_and_number_of_output_channels(
              buffer_size, 1, 1);
-        if processor_res.is_err() { return; }
+        if processor_res.is_err() {
+            return;
+        }
         let processor = processor_res.unwrap();
 
         let sample_rate = context.sample_rate();
 
         let closure = Closure::wrap(Box::new(move |event: web_sys::AudioProcessingEvent| {
-             let input_buffer = event.input_buffer().unwrap();
-             let input_data = input_buffer.get_channel_data(0).unwrap();
-             let samples: Vec<f64> = input_data.iter().map(|&s| s as f64).collect();
+            let input_buffer = event.input_buffer().unwrap();
+            let input_data = input_buffer.get_channel_data(0).unwrap();
+            let samples: Vec<f64> = input_data.iter().map(|&s| s as f64).collect();
 
-             let mut analyzer = analyzer.lock();
-             analyzer.analyze(samples.into_iter(), None);
+            let mut analyzer = analyzer.lock();
+            analyzer.analyze(samples.into_iter(), None);
 
-             let mut spectrogram = spectrogram.write();
-             let chunk_duration = Duration::from_secs_f64(buffer_size as f64 / sample_rate as f64);
+            let mut spectrogram = spectrogram.write();
+            let chunk_duration = Duration::from_secs_f64(buffer_size as f64 / sample_rate as f64);
 
-             spectrogram.update_fn(|analysis| {
-                 analysis.update_mono(&analyzer, config.gain, if config.normalize_amplitude { Some(config.listening_volume) } else { None }, chunk_duration);
-             });
+            spectrogram.update_fn(|analysis| {
+                analysis.update_mono(
+                    &analyzer,
+                    config.gain,
+                    if config.normalize_amplitude {
+                        Some(config.listening_volume)
+                    } else {
+                        None
+                    },
+                    chunk_duration,
+                );
+            });
 
-             // Pass through audio
-             let output_buffer = event.output_buffer().unwrap();
-             let mut output_data = output_buffer.get_channel_data(0).unwrap();
-             output_data.copy_from_slice(&input_data); // Copy input to output to hear it
+            // Pass through audio
+            let output_buffer = event.output_buffer().unwrap();
+            let mut output_data = output_buffer.get_channel_data(0).unwrap();
+            output_data.copy_from_slice(&input_data); // Copy input to output to hear it
+        }) as Box<dyn FnMut(_)>);
 
-         }) as Box<dyn FnMut(_)>);
+        processor.set_onaudioprocess(Some(closure.as_ref().unchecked_ref()));
 
-         processor.set_onaudioprocess(Some(closure.as_ref().unchecked_ref()));
+        let _ = source_node.connect_with_audio_node(&processor);
+        let _ = processor.connect_with_audio_node(&context.destination());
 
-         let _ = source_node.connect_with_audio_node(&processor);
-         let _ = processor.connect_with_audio_node(&context.destination());
-
-         let mut state = state_container.borrow_mut();
-         state.processor = Some(processor);
-         state.closure = Some(closure);
+        let mut state = state_container.borrow_mut();
+        state.processor = Some(processor);
+        state.closure = Some(closure);
     }
 }
 

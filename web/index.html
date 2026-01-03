@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KatVisualizer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: #1a1a1a;
+            color: #e0e0e0;
+            font-family: monospace;
+            font-size: 12px;
+            overflow: hidden;
+        }
+        #container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+        #canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        #overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            padding: 16px;
+            pointer-events: none;
+            display: flex;
+            justify-content: space-between;
+        }
+        #stats-left, #stats-right {
+            text-shadow: 0 0 4px rgba(0,0,0,0.8);
+            white-space: pre;
+        }
+        #stats-right {
+            text-align: right;
+        }
+        #settings-btn {
+            position: absolute;
+            right: 16px;
+            top: 80px;
+            padding: 8px 16px;
+            background: rgba(40, 40, 40, 0.8);
+            border: 1px solid #444;
+            color: #e0e0e0;
+            cursor: pointer;
+            font-family: monospace;
+            pointer-events: all;
+            z-index: 100;
+        }
+        #settings-btn:hover {
+            background: rgba(60, 60, 60, 0.9);
+        }
+        #settings-panel {
+            position: absolute;
+            right: 16px;
+            top: 120px;
+            background: rgba(30, 30, 30, 0.95);
+            border: 1px solid #444;
+            padding: 16px;
+            display: none;
+            max-height: 60vh;
+            overflow-y: auto;
+            pointer-events: all;
+            z-index: 99;
+        }
+        #settings-panel.open {
+            display: block;
+        }
+        #settings-panel h3 {
+            margin-bottom: 12px;
+            border-bottom: 1px solid #444;
+            padding-bottom: 8px;
+        }
+        .setting-row {
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .setting-row label {
+            min-width: 140px;
+        }
+        .setting-row input[type="range"] {
+            width: 100px;
+        }
+        .setting-row input[type="number"] {
+            width: 60px;
+            background: #333;
+            border: 1px solid #555;
+            color: #e0e0e0;
+            padding: 2px 4px;
+        }
+        #start-btn {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 20px 40px;
+            font-size: 18px;
+            background: rgba(40, 40, 40, 0.9);
+            border: 2px solid #666;
+            color: #e0e0e0;
+            cursor: pointer;
+            font-family: monospace;
+        }
+        #start-btn:hover {
+            background: rgba(60, 60, 60, 0.95);
+            border-color: #888;
+        }
+        #start-btn.hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <canvas id="canvas"></canvas>
+        <div id="overlay">
+            <div id="stats-left"></div>
+            <div id="stats-right"></div>
+        </div>
+        <button id="settings-btn">Settings</button>
+        <div id="settings-panel">
+            <h3>Settings</h3>
+            <div class="setting-row">
+                <label>Left Hue:</label>
+                <input type="range" id="left-hue" min="0" max="360" value="195">
+                <span id="left-hue-val">195</span>
+            </div>
+            <div class="setting-row">
+                <label>Right Hue:</label>
+                <input type="range" id="right-hue" min="0" max="360" value="328">
+                <span id="right-hue-val">328</span>
+            </div>
+            <div class="setting-row">
+                <label>Bargraph Height:</label>
+                <input type="range" id="bargraph-height" min="0" max="100" value="33">
+                <span id="bargraph-height-val">33%</span>
+            </div>
+        </div>
+        <button id="start-btn">Click to Start</button>
+    </div>
+
+    <script type="module">
+        import init, { Visualizer } from './pkg/katvisualizer_web.js';
+
+        let visualizer = null;
+        let audioContext = null;
+        let analyserNode = null;
+        let scriptProcessor = null;
+        let isRunning = false;
+        let lastFrameTime = 0;
+        let frameTime = 0;
+        let rasterizeTime = 0;
+        let processingTime = 0;
+
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const statsLeft = document.getElementById('stats-left');
+        const statsRight = document.getElementById('stats-right');
+        const settingsBtn = document.getElementById('settings-btn');
+        const settingsPanel = document.getElementById('settings-panel');
+        const startBtn = document.getElementById('start-btn');
+
+        function resizeCanvas() {
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = window.innerWidth * dpr;
+            canvas.height = window.innerHeight * dpr;
+            if (visualizer) {
+                visualizer.set_canvas_size(canvas.width, canvas.height);
+            }
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+
+        settingsBtn.addEventListener('click', () => {
+            settingsPanel.classList.toggle('open');
+        });
+
+        document.getElementById('left-hue').addEventListener('input', (e) => {
+            document.getElementById('left-hue-val').textContent = e.target.value;
+            if (visualizer) {
+                visualizer.set_colors(
+                    parseFloat(e.target.value),
+                    parseFloat(document.getElementById('right-hue').value)
+                );
+            }
+        });
+
+        document.getElementById('right-hue').addEventListener('input', (e) => {
+            document.getElementById('right-hue-val').textContent = e.target.value;
+            if (visualizer) {
+                visualizer.set_colors(
+                    parseFloat(document.getElementById('left-hue').value),
+                    parseFloat(e.target.value)
+                );
+            }
+        });
+
+        document.getElementById('bargraph-height').addEventListener('input', (e) => {
+            document.getElementById('bargraph-height-val').textContent = e.target.value + '%';
+            if (visualizer) {
+                visualizer.set_bargraph_height(parseFloat(e.target.value) / 100);
+            }
+        });
+
+        async function startAudio() {
+            try {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const sampleRate = audioContext.sampleRate;
+
+                await init();
+
+                visualizer = new Visualizer(sampleRate, 512);
+                resizeCanvas();
+
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        echoCancellation: false,
+                        noiseSuppression: false,
+                        autoGainControl: false
+                    }
+                });
+
+                const source = audioContext.createMediaStreamSource(stream);
+
+                // Use ScriptProcessorNode for direct sample access
+                // Buffer size 2048 at 48kHz = ~42ms latency, good balance
+                const bufferSize = 2048;
+                scriptProcessor = audioContext.createScriptProcessor(bufferSize, 2, 2);
+
+                scriptProcessor.onaudioprocess = (e) => {
+                    const processStart = performance.now();
+
+                    const leftChannel = e.inputBuffer.getChannelData(0);
+                    const rightChannel = e.inputBuffer.numberOfChannels > 1
+                        ? e.inputBuffer.getChannelData(1)
+                        : leftChannel;
+
+                    if (leftChannel === rightChannel || e.inputBuffer.numberOfChannels === 1) {
+                        visualizer.process_mono(leftChannel);
+                    } else {
+                        visualizer.process_stereo(leftChannel, rightChannel);
+                    }
+
+                    processingTime = performance.now() - processStart;
+                };
+
+                source.connect(scriptProcessor);
+                scriptProcessor.connect(audioContext.destination);
+
+                isRunning = true;
+                startBtn.classList.add('hidden');
+                requestAnimationFrame(render);
+
+            } catch (err) {
+                console.error('Error starting audio:', err);
+                alert('Could not access microphone. Please allow microphone access.');
+            }
+        }
+
+        function render(timestamp) {
+            if (!isRunning) return;
+
+            frameTime = timestamp - lastFrameTime;
+            lastFrameTime = timestamp;
+
+            const rasterStart = performance.now();
+
+            try {
+                visualizer.render(ctx);
+            } catch (err) {
+                console.error('Render error:', err);
+            }
+
+            rasterizeTime = performance.now() - rasterStart;
+
+            // Update stats
+            const freq = visualizer.get_peak_frequency();
+            const amp = visualizer.get_peak_amplitude();
+            const pan = visualizer.get_pan();
+
+            statsLeft.textContent = `${freq.toFixed(0)}hz
+${amp.toFixed(0)}dBFS, ${pan >= 0 ? '+' : ''}${pan.toFixed(2)} pan`;
+
+            const frameMs = frameTime.toFixed(0);
+            const rasterMs = rasterizeTime.toFixed(1);
+            const rasterPct = ((rasterizeTime / frameTime) * 100).toFixed(0);
+            const processMs = processingTime.toFixed(1);
+            const processPct = ((processingTime / frameTime) * 100).toFixed(0);
+
+            statsRight.textContent = `${frameMs}ms frame
+${rasterPct}% (${rasterMs}ms) rasterize
+${processPct}% (${processMs}ms) processing`;
+
+            requestAnimationFrame(render);
+        }
+
+        startBtn.addEventListener('click', startAudio);
+
+        // Initialize canvas on load
+        resizeCanvas();
+    </script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+{
+  "name": "katvisualizer-web",
+  "version": "0.1.0",
+  "scripts": {
+    "serve": "python3 -m http.server 8080",
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.40.0"
+  }
+}

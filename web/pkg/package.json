@@ -1,0 +1,15 @@
+{
+  "name": "katvisualizer-web",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "katvisualizer_web_bg.wasm",
+    "katvisualizer_web.js",
+    "katvisualizer_web.d.ts"
+  ],
+  "main": "katvisualizer_web.js",
+  "types": "katvisualizer_web.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

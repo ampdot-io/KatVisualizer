@@ -3,6 +3,9 @@ name    = "katvisualizer"
 version = "0.10.4"
 edition = "2024"
 
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
+
 [workspace]
 members = [
 	"xtask",
@@ -15,31 +18,36 @@ crate-type = [
 ]
 
 [features]
-default = [ "midi" ]
+default = [ "midi", "nih_plug", "nih_plug_egui", "threadpool", "parking_lot", "mimalloc", "rosc" ]
 force-mono = [  ]
 force-stereo = [  ]
 force-mono-to-stereo = [
 ]
 mute-output = [  ]
 midi = [  ]
+wasm = [ "wasm-bindgen", "web-sys", "js-sys", "console_error_panic_hook", "serde-wasm-bindgen" ]
 
 [dependencies]
 nih_plug = { git = "https://github.com/transkatgirl/nih-plug.git", rev = "1f132feff0b03df8b5078ffaa1087201c9545d3f", features = [
 	"assert_process_allocs",
 	"standalone",
-] }
-nih_plug_egui = { git = "https://github.com/transkatgirl/nih-plug.git", rev = "1f132feff0b03df8b5078ffaa1087201c9545d3f" }
+], optional = true }
+nih_plug_egui = { git = "https://github.com/transkatgirl/nih-plug.git", rev = "1f132feff0b03df8b5078ffaa1087201c9545d3f", optional = true }
 serde = { version = "1.0", features = [
 	"derive",
 ] }
 color = "0.3.2"
-threadpool = "1.8.1"
-parking_lot = "0.12.5"
+threadpool = { version = "1.8.1", optional = true }
+parking_lot = { version = "0.12.5", optional = true }
 mimalloc = { version = "0.1.48", features = [
 	"v3",
-] }
-voracious_radix_sort = "1.2.0"
-rosc = "0.11.4"
+], optional = true }
+rosc = { version = "0.11.4", optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+web-sys = { version = "0.3", features = ["console"], optional = true }
+js-sys = { version = "0.3", optional = true }
+console_error_panic_hook = { version = "0.1", optional = true }
+serde-wasm-bindgen = { version = "0.6", optional = true }
 
 [profile.dev]
 opt-level = 3

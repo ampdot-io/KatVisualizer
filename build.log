@@ -1,0 +1,176 @@
+Building KatVisualizer for WASM...
+Compiling Rust to WASM...
+[INFO]: Checking for the Wasm target...
+[INFO]: Compiling to Wasm...
+ Downloading crates ...
+  Downloaded serde-wasm-bindgen v0.6.5
+  Downloaded console_error_panic_hook v0.1.7
+   Compiling proc-macro2 v1.0.104
+   Compiling unicode-ident v1.0.22
+   Compiling quote v1.0.42
+   Compiling wasm-bindgen-shared v0.2.106
+   Compiling rustversion v1.0.22
+   Compiling bumpalo v3.19.1
+   Compiling cfg-if v1.0.4
+   Compiling once_cell v1.21.3
+   Compiling serde_core v1.0.228
+   Compiling serde v1.0.228
+   Compiling color v0.3.2
+   Compiling voracious_radix_sort v1.2.0
+error[E0407]: method `voracious_mt_sort` is not a member of trait `Dispatcher`
+   --> /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/voracious_radix_sort-1.2.0/src/traits/dispatcher.rs:312:5
+    |
+312 |       fn voracious_mt_sort(&self, arr: &mut [T], thread_n: usize) {
+    |       ^  ----------------- help: there is an associated function with a similar name: `voracious_sort`
+    |  _____|
+    | |
+313 | |         if arr.len() <= 256 {
+314 | |             arr.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+315 | |         } else if arr.len() < 5_000_000_000 {
+...   |
+321 | |     }
+    | |_____^ not a member of trait `Dispatcher`
+
+error[E0407]: method `voracious_mt_sort` is not a member of trait `Dispatcher`
+   --> /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/voracious_radix_sort-1.2.0/src/traits/dispatcher.rs:579:5
+    |
+579 |       fn voracious_mt_sort(&self, arr: &mut [T], thread_n: usize) {
+    |       ^  ----------------- help: there is an associated function with a similar name: `voracious_sort`
+    |  _____|
+    | |
+580 | |         if arr.len() <= 256 {
+581 | |             arr.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+582 | |         } else if arr.len() < 5_000_000_000 {
+...   |
+588 | |     }
+    | |_____^ not a member of trait `Dispatcher`
+
+error[E0425]: cannot find function `lsd_radixsort_heu` in this scope
+   --> /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/voracious_radix_sort-1.2.0/src/types/isize.rs:364:13
+    |
+364 |             lsd_radixsort_heu(arr, 8, 100_000);
+    |             ^^^^^^^^^^^^^^^^^ not found in this scope
+    |
+help: consider importing this function
+    |
+  6 + use crate::sorts::lsd_sort::lsd_radixsort_heu;
+    |
+
+error[E0425]: cannot find function `rollercoaster_sort_heu` in this scope
+   --> /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/voracious_radix_sort-1.2.0/src/types/isize.rs:366:13
+    |
+366 |               rollercoaster_sort_heu(arr, 8, 100_000);
+    |               ^^^^^^^^^^^^^^^^^^^^^^
+    |
+   ::: /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/voracious_radix_sort-1.2.0/src/sorts/rollercoaster_sort.rs:168:1
+    |
+168 | / pub fn rollercoaster_sort<T, K>(arr: &mut [T], radix: usize)
+169 | | where
+170 | |     T: Radixable<K>,
+171 | |     K: RadixKey,
+...   |
+181 | |     k_way_merge(arr, &mut separators);
+182 | | }
+    | |_- similarly named function `rollercoaster_sort` defined here
+    |
+help: a function with a similar name exists
+    |
+366 -             rollercoaster_sort_heu(arr, 8, 100_000);
+366 +             rollercoaster_sort(arr, 8, 100_000);
+    |
+help: consider importing this function
+    |
+  6 + use crate::sorts::rollercoaster_sort::rollercoaster_sort_heu;
+    |
+
+error[E0425]: cannot find function `lsd_radixsort_heu` in this scope
+   --> /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/voracious_radix_sort-1.2.0/src/types/usize.rs:364:13
+    |
+364 |               lsd_radixsort_heu(arr, 8, 85_000);
+    |               ^^^^^^^^^^^^^^^^^
+    |
+   ::: /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/voracious_radix_sort-1.2.0/src/sorts/dlsd_sort.rs:207:1
+    |
+207 | / pub fn dlsd_radixsort<T, K>(arr: &mut [T], radix: usize)
+208 | | where
+209 | |     T: Radixable<K>,
+210 | |     K: RadixKey,
+...   |
+220 | |     k_way_merge(arr, &mut separators);
+221 | | }
+    | |_- similarly named function `dlsd_radixsort` defined here
+    |
+help: a function with a similar name exists
+    |
+364 -             lsd_radixsort_heu(arr, 8, 85_000);
+364 +             dlsd_radixsort(arr, 8, 85_000);
+    |
+help: consider importing this function
+    |
+  4 + use crate::sorts::lsd_sort::lsd_radixsort_heu;
+    |
+
+error[E0425]: cannot find function `peeka_sort` in this scope
+   --> /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/voracious_radix_sort-1.2.0/src/traits/dispatcher.rs:316:13
+    |
+316 |             peeka_sort(arr, 8, 1_150_000, thread_n);
+    |             ^^^^^^^^^^ not found in this scope
+    |
+note: found an item that was configured out
+   --> /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/voracious_radix_sort-1.2.0/src/lib.rs:430:28
+    |
+429 | #[cfg(feature = "voracious_multithread")]
+    |       --------------------------------- the item is gated behind the `voracious_multithread` feature
+430 | pub use sorts::peeka_sort::peeka_sort;
+    |                            ^^^^^^^^^^
+
+error[E0425]: cannot find function `peeka_sort` in this scope
+   --> /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/voracious_radix_sort-1.2.0/src/traits/dispatcher.rs:319:13
+    |
+319 |             peeka_sort(arr, 8, 5_000, thread_n);
+    |             ^^^^^^^^^^ not found in this scope
+    |
+note: found an item that was configured out
+   --> /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/voracious_radix_sort-1.2.0/src/lib.rs:430:28
+    |
+429 | #[cfg(feature = "voracious_multithread")]
+    |       --------------------------------- the item is gated behind the `voracious_multithread` feature
+430 | pub use sorts::peeka_sort::peeka_sort;
+    |                            ^^^^^^^^^^
+
+error[E0425]: cannot find function `peeka_sort` in this scope
+   --> /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/voracious_radix_sort-1.2.0/src/traits/dispatcher.rs:583:13
+    |
+583 |             peeka_sort(arr, 8, 1_150_000, thread_n);
+    |             ^^^^^^^^^^ not found in this scope
+    |
+note: found an item that was configured out
+   --> /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/voracious_radix_sort-1.2.0/src/lib.rs:430:28
+    |
+429 | #[cfg(feature = "voracious_multithread")]
+    |       --------------------------------- the item is gated behind the `voracious_multithread` feature
+430 | pub use sorts::peeka_sort::peeka_sort;
+    |                            ^^^^^^^^^^
+
+error[E0425]: cannot find function `peeka_sort` in this scope
+   --> /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/voracious_radix_sort-1.2.0/src/traits/dispatcher.rs:586:13
+    |
+586 |             peeka_sort(arr, 8, 5_000, thread_n);
+    |             ^^^^^^^^^^ not found in this scope
+    |
+note: found an item that was configured out
+   --> /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/voracious_radix_sort-1.2.0/src/lib.rs:430:28
+    |
+429 | #[cfg(feature = "voracious_multithread")]
+    |       --------------------------------- the item is gated behind the `voracious_multithread` feature
+430 | pub use sorts::peeka_sort::peeka_sort;
+    |                            ^^^^^^^^^^
+
+Some errors have detailed explanations: E0407, E0425.
+For more information about an error, try `rustc --explain E0407`.
+error: could not compile `voracious_radix_sort` (lib) due to 9 previous errors
+warning: build failed, waiting for other jobs to finish...
+Error: Compiling your crate to WebAssembly failed
+Caused by: Compiling your crate to WebAssembly failed
+Caused by: failed to execute `cargo build`: exited with exit status: 101
+  full command: cd "/home/user/KatVisualizer" && "cargo" "build" "--lib" "--release" "--target" "wasm32-unknown-unknown" "--no-default-features" "--features" "wasm"

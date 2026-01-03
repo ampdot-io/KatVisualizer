@@ -1,49 +1,64 @@
 // TODO: Go through https://nnethercote.github.io/perf-book/title-page.html and apply applicable optimizations
 
-#[cfg(not(debug_assertions))]
+#[cfg(all(not(debug_assertions), not(feature = "wasm")))]
 use mimalloc::MiMalloc;
 
+#[cfg(not(feature = "wasm"))]
 use nih_plug::{
     midi::control_change::{ALL_NOTES_OFF, POLY_MODE_ON},
     prelude::*,
     util::StftHelper,
     util::freq_to_midi_note,
 };
+#[cfg(not(feature = "wasm"))]
 use nih_plug_egui::EguiState;
+#[cfg(not(feature = "wasm"))]
 use parking_lot::{FairMutex, Mutex, RwLock};
+#[cfg(not(feature = "wasm"))]
 use rosc::{OscArray, OscBundle, OscMessage, OscPacket, OscTime, OscType, encoder};
+#[cfg(not(feature = "wasm"))]
 use std::{
     net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, UdpSocket},
     num::NonZero,
     sync::Arc,
     time::{Duration, Instant, SystemTime},
 };
+#[cfg(not(feature = "wasm"))]
 use threadpool::ThreadPool;
 
-#[cfg(not(debug_assertions))]
+#[cfg(all(not(debug_assertions), not(feature = "wasm")))]
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
+pub mod analyzer;
+
+#[cfg(not(feature = "wasm"))]
+mod editor;
+
+#[cfg(feature = "wasm")]
+pub mod wasm;
+
+#[cfg(not(feature = "wasm"))]
 use crate::analyzer::{
     BetterAnalyzer, BetterAnalyzerConfiguration, BetterSpectrogram, amplitude_to_dbfs,
     dbfs_to_amplitude, map_value_f32,
 };
 
-pub mod analyzer;
-mod editor;
-
+#[cfg(not(feature = "wasm"))]
 #[derive(Clone, Copy)]
 pub(crate) struct AnalysisMetrics {
     processing: Duration,
     finished: Instant,
 }
 
+#[cfg(not(feature = "wasm"))]
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct PluginStateInfo {
     audio_io_layout: AudioIOLayout,
     buffer_config: BufferConfig,
 }
 
+#[cfg(not(feature = "wasm"))]
 pub struct MyPlugin {
     params: Arc<PluginParams>,
     analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
@@ -56,16 +71,21 @@ pub struct MyPlugin {
     state_info: Arc<RwLock<Option<PluginStateInfo>>>,
 }
 
+#[cfg(not(feature = "wasm"))]
 #[derive(Params)]
 pub struct PluginParams {
     #[persist = "editor-state"]
     editor_state: Arc<EguiState>,
 }
 
+#[cfg(not(feature = "wasm"))]
 const MAX_FREQUENCY_BINS: usize = 2048;
+#[cfg(not(feature = "wasm"))]
 const SPECTROGRAM_SLICES: usize = 8192;
+#[cfg(not(feature = "wasm"))]
 const MAX_OSC_FREQUENCY_BINS: usize = 320;
 
+#[cfg(not(feature = "wasm"))]
 impl Default for MyPlugin {
     fn default() -> Self {
         Self {
@@ -88,6 +108,7 @@ impl Default for MyPlugin {
     }
 }
 
+#[cfg(not(feature = "wasm"))]
 impl Default for PluginParams {
     fn default() -> Self {
         Self {
@@ -96,6 +117,7 @@ impl Default for PluginParams {
     }
 }
 
+#[cfg(not(feature = "wasm"))]
 impl Plugin for MyPlugin {
     const NAME: &'static str = "KatVisualizer";
     const VENDOR: &'static str = "transkatgirl";
@@ -319,6 +341,7 @@ impl Plugin for MyPlugin {
     }
 }
 
+#[cfg(not(feature = "wasm"))]
 #[derive(Clone)]
 pub(crate) struct AnalysisChainConfig {
     gain: f64,
@@ -350,6 +373,7 @@ pub(crate) struct AnalysisChainConfig {
     nc_method: bool,
 }
 
+#[cfg(not(feature = "wasm"))]
 impl Default for AnalysisChainConfig {
     fn default() -> Self {
         Self {
@@ -390,6 +414,7 @@ impl Default for AnalysisChainConfig {
     }
 }
 
+#[cfg(not(feature = "wasm"))]
 #[allow(clippy::type_complexity)]
 pub(crate) struct AnalysisChain {
     chunker: StftHelper<0>,
@@ -422,6 +447,7 @@ pub(crate) struct AnalysisChain {
     osc_output: Arc<Mutex<Vec<(f32, f32, f32, f32, f32)>>>,
 }
 
+#[cfg(not(feature = "wasm"))]
 impl AnalysisChain {
     fn new(
         config: &AnalysisChainConfig,
@@ -1060,6 +1086,7 @@ impl AnalysisChain {
     }
 }
 
+#[cfg(not(feature = "wasm"))]
 impl ClapPlugin for MyPlugin {
     const CLAP_ID: &'static str = "com.transkatgirl.katvisualizer";
     const CLAP_DESCRIPTION: Option<&'static str> = None;
@@ -1073,11 +1100,14 @@ impl ClapPlugin for MyPlugin {
     ];
 }
 
+#[cfg(not(feature = "wasm"))]
 impl Vst3Plugin for MyPlugin {
     const VST3_CLASS_ID: [u8; 16] = *b"transkatgirlVizu";
     const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] =
         &[Vst3SubCategory::Fx, Vst3SubCategory::Analyzer];
 }
 
+#[cfg(not(feature = "wasm"))]
 nih_export_clap!(MyPlugin);
+#[cfg(not(feature = "wasm"))]
 nih_export_vst3!(MyPlugin);

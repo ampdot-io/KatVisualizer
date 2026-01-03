@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Comprehensive Visualizer Test</title>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: monospace;
+            background: #1e1e2e;
+            color: #e0e0e0;
+            padding: 20px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        h1 { color: #00d4ff; }
+        h2 { color: #00a8cc; margin-top: 30px; }
+        .test-step {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 20px;
+            margin: 15px 0;
+            border-radius: 10px;
+            border-left: 4px solid #00d4ff;
+        }
+        .success { color: #00ff00; }
+        .error { color: #ff0066; }
+        .warning { color: #ffaa00; }
+        .info { color: #00d4ff; }
+        button {
+            background: #00d4ff;
+            color: #000;
+            border: none;
+            padding: 12px 24px;
+            margin: 5px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 14px;
+        }
+        button:hover { background: #00a8cc; }
+        button:disabled {
+            background: #555;
+            cursor: not-allowed;
+        }
+        pre {
+            background: #000;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .progress {
+            width: 100%;
+            height: 30px;
+            background: #000;
+            border-radius: 5px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #00d4ff, #7b2cbf);
+            width: 0%;
+            transition: width 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-weight: bold;
+        }
+        canvas {
+            width: 100%;
+            height: 300px;
+            background: #000;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎵 KatVisualizer - Comprehensive End-to-End Test</h1>
+
+    <div class="test-step">
+        <h2>Step 1: WASM Module Loading</h2>
+        <div id="step1Status">Testing...</div>
+        <button onclick="testStep1()" id="btn1">Retry Step 1</button>
+    </div>
+
+    <div class="test-step">
+        <h2>Step 2: Audio Generation</h2>
+        <div id="step2Status">Waiting for Step 1...</div>
+        <button onclick="generateTestAudio()" id="btn2" disabled>Generate Test Audio</button>
+        <div class="progress">
+            <div class="progress-bar" id="audioProgress">0%</div>
+        </div>
+    </div>
+
+    <div class="test-step">
+        <h2>Step 3: Visualizer Initialization</h2>
+        <div id="step3Status">Waiting for Step 2...</div>
+        <button onclick="testStep3()" id="btn3" disabled>Test Initialization</button>
+    </div>
+
+    <div class="test-step">
+        <h2>Step 4: Audio Processing</h2>
+        <div id="step4Status">Waiting for Step 3...</div>
+        <button onclick="testStep4()" id="btn4" disabled>Process Audio</button>
+        <canvas id="testCanvas"></canvas>
+    </div>
+
+    <div class="test-step">
+        <h2>Step 5: Full Playback Test</h2>
+        <div id="step5Status">Waiting for Step 4...</div>
+        <button onclick="testStep5()" id="btn5" disabled>Start Playback Test</button>
+        <button onclick="stopPlayback()" id="btnStop" disabled>Stop</button>
+        <div class="progress">
+            <div class="progress-bar" id="playbackProgress">0%</div>
+        </div>
+    </div>
+
+    <div class="test-step">
+        <h2>Test Log</h2>
+        <pre id="log"></pre>
+    </div>
+
+    <div class="test-step">
+        <h2>Open Main Visualizer</h2>
+        <button onclick="window.open('index.html', '_blank')">Open Main Visualizer</button>
+        <button onclick="window.open('test.html', '_blank')">Open Test Suite</button>
+        <button onclick="window.open('generate_test_tone.html', '_blank')">Audio Generator</button>
+    </div>
+
+    <script type="module">
+        let wasm = null;
+        let visualizer = null;
+        let audioContext = null;
+        let testAudioBuffer = null;
+        let currentSource = null;
+        let playbackInterval = null;
+
+        const canvas = document.getElementById('testCanvas');
+        const ctx = canvas.getContext('2d');
+
+        function log(message, type = 'info') {
+            const logEl = document.getElementById('log');
+            const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+            logEl.innerHTML += `<span class="${type}">[${timestamp}] ${message}</span>\n`;
+            logEl.scrollTop = logEl.scrollHeight;
+            console.log(message);
+        }
+
+        function updateProgress(id, percent) {
+            const el = document.getElementById(id);
+            el.style.width = percent + '%';
+            el.textContent = Math.round(percent) + '%';
+        }
+
+        // Step 1: Load WASM
+        async function testStep1() {
+            log('=== Step 1: Loading WASM Module ===', 'info');
+            try {
+                const module = await import('./pkg/katvisualizer.js');
+                wasm = module;
+                log('✓ WASM module loaded successfully', 'success');
+                document.getElementById('step1Status').innerHTML =
+                    '<span class="success">✓ WASM module loaded</span>';
+                document.getElementById('btn2').disabled = false;
+                return true;
+            } catch (error) {
+                log(`✗ Failed to load WASM: ${error}`, 'error');
+                document.getElementById('step1Status').innerHTML =
+                    `<span class="error">✗ Failed: ${error.message}</span>`;
+                return false;
+            }
+        }
+
+        // Step 2: Generate test audio
+        window.generateTestAudio = async function() {
+            log('=== Step 2: Generating Test Audio ===', 'info');
+            document.getElementById('step2Status').innerHTML = 'Generating...';
+
+            try {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                log(`✓ Audio context created (${audioContext.sampleRate} Hz)`, 'success');
+
+                const duration = 3;
+                const frequency = 440;
+                const sampleRate = audioContext.sampleRate;
+                const bufferSize = sampleRate * duration;
+
+                updateProgress('audioProgress', 25);
+
+                const buffer = audioContext.createBuffer(1, bufferSize, sampleRate);
+                const data = buffer.getChannelData(0);
+
+                updateProgress('audioProgress', 50);
+
+                for (let i = 0; i < bufferSize; i++) {
+                    data[i] = Math.sin(2 * Math.PI * frequency * i / sampleRate) * 0.5;
+                    if (i % 10000 === 0) {
+                        updateProgress('audioProgress', 50 + (i / bufferSize) * 50);
+                        await new Promise(resolve => setTimeout(resolve, 0));
+                    }
+                }
+
+                testAudioBuffer = buffer;
+                updateProgress('audioProgress', 100);
+
+                log(`✓ Generated ${frequency}Hz sine wave (${duration}s, ${bufferSize} samples)`, 'success');
+                document.getElementById('step2Status').innerHTML =
+                    '<span class="success">✓ Test audio generated (440Hz, 3s)</span>';
+                document.getElementById('btn3').disabled = false;
+                return true;
+            } catch (error) {
+                log(`✗ Failed to generate audio: ${error}`, 'error');
+                document.getElementById('step2Status').innerHTML =
+                    `<span class="error">✗ Failed: ${error.message}</span>`;
+                return false;
+            }
+        };
+
+        // Step 3: Initialize visualizer
+        window.testStep3 = function() {
+            log('=== Step 3: Initializing Visualizer ===', 'info');
+            try {
+                if (visualizer) {
+                    visualizer.free();
+                }
+
+                visualizer = new wasm.WasmVisualizer(audioContext.sampleRate);
+                const binCount = visualizer.get_frequency_count();
+
+                log(`✓ Visualizer initialized with ${binCount} frequency bins`, 'success');
+                document.getElementById('step3Status').innerHTML =
+                    `<span class="success">✓ Visualizer initialized (${binCount} bins)</span>`;
+                document.getElementById('btn4').disabled = false;
+                return true;
+            } catch (error) {
+                log(`✗ Failed to initialize visualizer: ${error}`, 'error');
+                document.getElementById('step3Status').innerHTML =
+                    `<span class="error">✗ Failed: ${error.message}</span>`;
+                return false;
+            }
+        };
+
+        // Step 4: Process audio
+        window.testStep4 = function() {
+            log('=== Step 4: Processing Audio ===', 'info');
+            try {
+                const chunkSize = 4096;
+                const samples = testAudioBuffer.getChannelData(0).slice(0, chunkSize);
+
+                log(`Processing ${samples.length} samples...`, 'info');
+                visualizer.process_mono(samples);
+
+                const data = visualizer.get_spectrogram_data();
+                log(`✓ Got spectrogram data (${data.frequencies.length} bins)`, 'success');
+                log(`  Mean: ${data.mean.toFixed(2)} dB, Max: ${data.max.toFixed(2)} dB`, 'info');
+
+                // Draw visualization
+                drawSpectrogram(data);
+
+                document.getElementById('step4Status').innerHTML =
+                    '<span class="success">✓ Audio processed successfully</span>';
+                document.getElementById('btn5').disabled = false;
+                return true;
+            } catch (error) {
+                log(`✗ Failed to process audio: ${error}`, 'error');
+                document.getElementById('step4Status').innerHTML =
+                    `<span class="error">✗ Failed: ${error.message}</span>`;
+                return false;
+            }
+        };
+
+        function drawSpectrogram(data) {
+            const width = canvas.width;
+            const height = canvas.height;
+
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, width, height);
+
+            if (!data || !data.frequencies || data.frequencies.length === 0) {
+                log('No frequency data to draw', 'warning');
+                return;
+            }
+
+            const barWidth = width / data.frequencies.length;
+
+            data.frequencies.forEach((bin, i) => {
+                const normalized = Math.max(0, Math.min(1, (bin.volume + 80) / 80));
+                const barHeight = normalized * height * 0.9;
+                const y = height - barHeight;
+
+                const hue = (Math.log(bin.center / 20) / Math.log(20000 / 20)) * 240;
+                ctx.fillStyle = `hsl(${hue}, 70%, ${30 + normalized * 40}%)`;
+                ctx.fillRect(i * barWidth, y, barWidth - 1, barHeight);
+            });
+
+            log('✓ Visualization rendered', 'success');
+        }
+
+        // Step 5: Full playback test
+        window.testStep5 = function() {
+            log('=== Step 5: Full Playback Test ===', 'info');
+            try {
+                if (currentSource) {
+                    currentSource.stop();
+                }
+
+                currentSource = audioContext.createBufferSource();
+                currentSource.buffer = testAudioBuffer;
+                currentSource.connect(audioContext.destination);
+                currentSource.start();
+
+                document.getElementById('btnStop').disabled = false;
+
+                log('✓ Playback started', 'success');
+
+                const chunkSize = 4096;
+                let offset = 0;
+                const totalSamples = testAudioBuffer.length;
+
+                playbackInterval = setInterval(() => {
+                    if (offset >= totalSamples) {
+                        clearInterval(playbackInterval);
+                        updateProgress('playbackProgress', 100);
+                        log('✓ Playback complete', 'success');
+                        document.getElementById('step5Status').innerHTML =
+                            '<span class="success">✓ Full playback test passed</span>';
+                        document.getElementById('btnStop').disabled = true;
+                        return;
+                    }
+
+                    const chunk = testAudioBuffer.getChannelData(0).slice(offset, offset + chunkSize);
+                    visualizer.process_mono(chunk);
+
+                    const data = visualizer.get_spectrogram_data();
+                    drawSpectrogram(data);
+
+                    offset += chunkSize;
+                    const progress = (offset / totalSamples) * 100;
+                    updateProgress('playbackProgress', progress);
+                }, 100);
+
+                currentSource.onended = () => {
+                    if (playbackInterval) {
+                        clearInterval(playbackInterval);
+                        updateProgress('playbackProgress', 100);
+                        log('✓ Playback ended naturally', 'success');
+                        document.getElementById('btnStop').disabled = true;
+                    }
+                };
+
+                document.getElementById('step5Status').innerHTML =
+                    '<span class="info">Playing...</span>';
+                return true;
+            } catch (error) {
+                log(`✗ Failed playback test: ${error}`, 'error');
+                document.getElementById('step5Status').innerHTML =
+                    `<span class="error">✗ Failed: ${error.message}</span>`;
+                return false;
+            }
+        };
+
+        window.stopPlayback = function() {
+            if (currentSource) {
+                currentSource.stop();
+                currentSource = null;
+            }
+            if (playbackInterval) {
+                clearInterval(playbackInterval);
+                playbackInterval = null;
+            }
+            document.getElementById('btnStop').disabled = true;
+            log('Playback stopped', 'warning');
+        };
+
+        // Resize canvas
+        function resizeCanvas() {
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = rect.width * window.devicePixelRatio;
+            canvas.height = rect.height * window.devicePixelRatio;
+            ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+        }
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+
+        // Auto-start
+        log('=== KatVisualizer Comprehensive Test ===', 'info');
+        log('Starting automated tests...', 'info');
+        testStep1();
+
+        // Make functions global
+        window.testStep1 = testStep1;
+    </script>
+</body>
+</html>

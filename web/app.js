@@ -40,7 +40,7 @@ let fpsUpdateTime = performance.now();
 // Initialize
 async function init() {
     try {
-        const { WasmVisualizer } = await import('../pkg/katvisualizer.js');
+        const { WasmVisualizer } = await import('./katvisualizer.js');
         wasm = { WasmVisualizer };
 
         setupCanvas();

@@ -14,6 +14,21 @@
         .pass { color: #0f0; }
         .fail { color: #f00; }
         pre { background: #000; padding: 10px; overflow-x: auto; }
+        canvas {
+            border: 1px solid #333;
+            margin: 10px 0;
+            display: block;
+        }
+        .canvas-section {
+            background: #000;
+            padding: 10px;
+            margin: 20px 0;
+            border: 1px solid #333;
+        }
+        .canvas-section h3 {
+            color: #0ff;
+            margin: 0 0 10px 0;
+        }
     </style>
 </head>
 <body>
@@ -181,6 +196,108 @@
                 }
                 log('Memory stability test completed');
 
+                // Visual Tests
+                log('\n=== Visual Rendering Tests ===');
+
+                // Test 11: Canvas rendering - Silence
+                log('Testing visual rendering of silence...');
+                const silenceCanvas = createCanvas('silence-test', 800, 200);
+                drawSpectrum(silenceCanvas, silenceResult, freqs, 'Silence (should be dark/black)');
+                const silencePixels = checkCanvasPixels(silenceCanvas);
+                if (silencePixels.hasColor) {
+                    log(`WARNING: Silence rendering shows significant color (avg brightness: ${silencePixels.avgBrightness.toFixed(2)})`, true);
+                } else {
+                    log(`Silence renders correctly (avg brightness: ${silencePixels.avgBrightness.toFixed(2)})`);
+                }
+
+                // Test 12: Canvas rendering - 440 Hz Sine
+                log('Testing visual rendering of 440 Hz sine wave...');
+                const sineCanvas = createCanvas('sine-test', 800, 200);
+                drawSpectrum(sineCanvas, sineResult, freqs, '440 Hz Sine Wave');
+                const sinePixels = checkCanvasPixels(sineCanvas);
+                if (!sinePixels.hasColor) {
+                    log('ERROR: Sine wave rendering shows no color!', true);
+                } else {
+                    log(`Sine wave renders with color (avg brightness: ${sinePixels.avgBrightness.toFixed(2)})`);
+                }
+
+                // Test 13: Peak position verification
+                log('Testing peak appears at correct visual position...');
+                const peakBinVisual = findPeakBin(sineResult);
+                const expectedX = (peakBinVisual / (freqs.length)) * sineCanvas.width;
+                const peakPixelBrightness = checkRegionBrightness(sineCanvas, expectedX - 20, expectedX + 20);
+                log(`Peak visual position: x=${expectedX.toFixed(0)}, brightness=${peakPixelBrightness.toFixed(2)}`);
+
+                if (peakPixelBrightness < 100) {
+                    log('WARNING: Peak region is darker than expected', true);
+                } else {
+                    log('Peak region shows expected brightness');
+                }
+
+                // Test 14: Color gradient verification
+                log('Testing rainbow color gradient across spectrum...');
+                const colorTest = verifyColorGradient(sineCanvas);
+                if (colorTest.hasGradient) {
+                    log('Rainbow color gradient detected');
+                } else {
+                    log('WARNING: Color gradient not detected - colors may be uniform', true);
+                }
+                logData('Color distribution', {
+                    uniqueColors: colorTest.uniqueColors,
+                    redAvg: colorTest.avgRed.toFixed(1),
+                    greenAvg: colorTest.avgGreen.toFixed(1),
+                    blueAvg: colorTest.avgBlue.toFixed(1)
+                });
+
+                // Test 15: Multi-frequency visual separation
+                log('Testing visual separation of multiple frequencies...');
+                const multiCanvas = createCanvas('multi-test', 800, 200);
+                drawSpectrum(multiCanvas, mixResult, freqs, '220 Hz + 880 Hz Mix');
+                const multiPeaks = findVisualPeaks(multiCanvas, freqs);
+                log(`Found ${multiPeaks.length} visual peaks`);
+                if (multiPeaks.length < 2) {
+                    log('WARNING: Expected at least 2 visual peaks for multi-frequency signal', true);
+                } else {
+                    log('Multiple peaks visible in rendering');
+                    logData('Visual peak positions', multiPeaks.map(p => ({
+                        x: p.x,
+                        brightness: p.brightness.toFixed(1)
+                    })));
+                }
+
+                // Test 16: Gain visual effect
+                log('Testing gain affects visual brightness...');
+                const normalCanvas = createCanvas('normal-gain-test', 400, 100);
+                const highGainCanvas = createCanvas('high-gain-test', 400, 100);
+
+                viz.set_gain(0.0);
+                const normalGainResult = viz.analyze(sineSamples);
+                drawSpectrum(normalCanvas, normalGainResult, freqs, 'Normal Gain (0 dB)');
+                const normalBrightness = checkCanvasPixels(normalCanvas).avgBrightness;
+
+                viz.set_gain(20.0);
+                const highGainResult = viz.analyze(sineSamples);
+                drawSpectrum(highGainCanvas, highGainResult, freqs, 'High Gain (+20 dB)');
+                const highBrightness = checkCanvasPixels(highGainCanvas).avgBrightness;
+
+                viz.set_gain(0.0); // Reset
+
+                log(`Normal gain brightness: ${normalBrightness.toFixed(2)}`);
+                log(`High gain brightness: ${highBrightness.toFixed(2)}`);
+
+                if (highBrightness <= normalBrightness) {
+                    log('ERROR: High gain does not increase visual brightness!', true);
+                } else {
+                    const increase = ((highBrightness / normalBrightness - 1) * 100).toFixed(1);
+                    log(`Gain correctly increases brightness by ${increase}%`);
+                }
+
+                // Test 17: Frequency label positioning
+                log('Testing frequency labels render at correct positions...');
+                const labelCanvas = createCanvas('label-test', 1200, 300);
+                drawSpectrumWithLabels(labelCanvas, sineResult, freqs);
+                log('Frequency labels rendered (visual inspection required)');
+
                 log('\n=== All tests completed ===');
 
             } catch (err) {
@@ -191,6 +308,238 @@
                     stack: err.stack
                 });
             }
+        }
+
+        // Visual testing helper functions
+        function createCanvas(id, width, height) {
+            const section = document.createElement('div');
+            section.className = 'canvas-section';
+
+            const title = document.createElement('h3');
+            title.textContent = id.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            section.appendChild(title);
+
+            const canvas = document.createElement('canvas');
+            canvas.id = id;
+            canvas.width = width;
+            canvas.height = height;
+            section.appendChild(canvas);
+
+            results.appendChild(section);
+            return canvas;
+        }
+
+        function drawSpectrum(canvas, spectrum, frequencies, title = '') {
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width;
+            const h = canvas.height;
+            const bins = spectrum.length / 2;
+
+            // Clear
+            ctx.fillStyle = '#0a0a0a';
+            ctx.fillRect(0, 0, w, h);
+
+            // Draw bars
+            const barWidth = w / bins;
+            for (let i = 0; i < bins; i++) {
+                const value = spectrum[i * 2 + 1];
+                const freq = frequencies[i];
+
+                // Rainbow color based on frequency
+                const hue = Math.log2(freq / 20) / Math.log2(20000 / 20) * 360;
+                const lightness = 30 + value * 50;
+                const chroma = value * 80;
+                const saturation = Math.min(100, chroma);
+
+                ctx.fillStyle = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+
+                const barHeight = value * h * 0.8;
+                const x = i * barWidth;
+                const y = h - barHeight;
+
+                ctx.fillRect(x, y, barWidth - 1, barHeight);
+            }
+
+            // Draw title
+            if (title) {
+                ctx.fillStyle = '#0ff';
+                ctx.font = '12px monospace';
+                ctx.fillText(title, 5, 15);
+            }
+        }
+
+        function drawSpectrumWithLabels(canvas, spectrum, frequencies) {
+            drawSpectrum(canvas, spectrum, frequencies);
+
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width;
+            const h = canvas.height;
+            const bins = spectrum.length / 2;
+            const barWidth = w / bins;
+
+            // Draw frequency labels
+            ctx.fillStyle = '#0f0';
+            ctx.font = '10px monospace';
+            const labels = [20, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
+
+            labels.forEach(targetFreq => {
+                let closestIdx = 0;
+                let closestDiff = Infinity;
+                for (let i = 0; i < bins; i++) {
+                    const diff = Math.abs(frequencies[i] - targetFreq);
+                    if (diff < closestDiff) {
+                        closestDiff = diff;
+                        closestIdx = i;
+                    }
+                }
+                const x = closestIdx * barWidth;
+                const label = targetFreq >= 1000 ? (targetFreq/1000)+'k' : targetFreq+'';
+                ctx.fillText(label, x + 2, h - 5);
+            });
+        }
+
+        function checkCanvasPixels(canvas) {
+            const ctx = canvas.getContext('2d');
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const pixels = imageData.data;
+
+            let totalBrightness = 0;
+            let colorPixels = 0;
+            let totalPixels = 0;
+
+            for (let i = 0; i < pixels.length; i += 4) {
+                const r = pixels[i];
+                const g = pixels[i + 1];
+                const b = pixels[i + 2];
+                const brightness = (r + g + b) / 3;
+
+                totalBrightness += brightness;
+                totalPixels++;
+
+                if (brightness > 20) {
+                    colorPixels++;
+                }
+            }
+
+            const avgBrightness = totalBrightness / totalPixels;
+            const hasColor = avgBrightness > 15 && colorPixels > (totalPixels * 0.01);
+
+            return {
+                avgBrightness,
+                hasColor,
+                colorPixelRatio: colorPixels / totalPixels
+            };
+        }
+
+        function checkRegionBrightness(canvas, xStart, xEnd) {
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width;
+            const h = canvas.height;
+
+            xStart = Math.max(0, Math.floor(xStart));
+            xEnd = Math.min(w, Math.ceil(xEnd));
+
+            const imageData = ctx.getImageData(xStart, 0, xEnd - xStart, h);
+            const pixels = imageData.data;
+
+            let totalBrightness = 0;
+            let count = 0;
+
+            for (let i = 0; i < pixels.length; i += 4) {
+                const r = pixels[i];
+                const g = pixels[i + 1];
+                const b = pixels[i + 2];
+                totalBrightness += (r + g + b) / 3;
+                count++;
+            }
+
+            return totalBrightness / count;
+        }
+
+        function verifyColorGradient(canvas) {
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width;
+            const h = canvas.height;
+
+            // Sample colors across the width
+            const samples = 10;
+            const colors = [];
+
+            for (let i = 0; i < samples; i++) {
+                const x = Math.floor((i / samples) * w);
+                const y = Math.floor(h / 2);
+                const pixel = ctx.getImageData(x, y, 1, 1).data;
+                colors.push({ r: pixel[0], g: pixel[1], b: pixel[2] });
+            }
+
+            // Check for variation
+            let rVariance = 0, gVariance = 0, bVariance = 0;
+            const avgR = colors.reduce((sum, c) => sum + c.r, 0) / colors.length;
+            const avgG = colors.reduce((sum, c) => sum + c.g, 0) / colors.length;
+            const avgB = colors.reduce((sum, c) => sum + c.b, 0) / colors.length;
+
+            colors.forEach(c => {
+                rVariance += Math.abs(c.r - avgR);
+                gVariance += Math.abs(c.g - avgG);
+                bVariance += Math.abs(c.b - avgB);
+            });
+
+            const totalVariance = rVariance + gVariance + bVariance;
+            const hasGradient = totalVariance > 100; // Threshold for gradient detection
+
+            // Count unique colors
+            const uniqueColors = new Set(colors.map(c => `${c.r},${c.g},${c.b}`)).size;
+
+            return {
+                hasGradient,
+                uniqueColors,
+                avgRed: avgR,
+                avgGreen: avgG,
+                avgBlue: avgB,
+                variance: totalVariance
+            };
+        }
+
+        function findPeakBin(spectrum) {
+            let peakBin = 0;
+            let peakValue = 0;
+            for (let i = 0; i < spectrum.length / 2; i++) {
+                const value = spectrum[i * 2 + 1];
+                if (value > peakValue) {
+                    peakValue = value;
+                    peakBin = i;
+                }
+            }
+            return peakBin;
+        }
+
+        function findVisualPeaks(canvas, frequencies) {
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width;
+            const h = canvas.height;
+
+            // Sample brightness across width
+            const samples = [];
+            const step = 5;
+
+            for (let x = 0; x < w; x += step) {
+                const brightness = checkRegionBrightness(canvas, x, x + step);
+                samples.push({ x, brightness });
+            }
+
+            // Find local maxima
+            const peaks = [];
+            for (let i = 1; i < samples.length - 1; i++) {
+                const prev = samples[i - 1].brightness;
+                const curr = samples[i].brightness;
+                const next = samples[i + 1].brightness;
+
+                if (curr > prev && curr > next && curr > 100) {
+                    peaks.push(samples[i]);
+                }
+            }
+
+            return peaks;
         }
 
         runTests();

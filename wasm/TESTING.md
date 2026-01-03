@@ -25,6 +25,8 @@ python3 -m http.server 8080
 
 ### test.html
 Automated test suite that verifies:
+
+**Data Tests:**
 - WASM module loading
 - Frequency bin generation
 - Silence analysis (should return ~0 values)
@@ -34,7 +36,18 @@ Automated test suite that verifies:
 - Different resolutions (64, 256, 512 bins)
 - Memory stability
 
-**Expected output**: All tests should pass (green checkmarks)
+**Visual Rendering Tests:**
+- Canvas renders silence as dark/black
+- Canvas renders sine wave with visible color
+- Peak appears at correct visual position
+- Rainbow color gradient across spectrum
+- Multiple frequencies show as separate visual peaks
+- Gain increases visual brightness
+- Frequency labels render at correct positions
+
+**Expected output**: All tests should pass (green checkmarks) with visual spectrum renderings displayed
+
+Each visual test creates a canvas showing the actual rendered visualization, allowing both automated verification and manual inspection
 
 ### debug.html
 Interactive debug viewer with:
@@ -77,16 +90,32 @@ Full application with:
 
 ## Manual Testing Checklist
 
+**Build and Data Tests:**
 - [ ] Build completes without errors
-- [ ] test.html shows all tests passing
-- [ ] debug.html "Test 440 Hz Sine" shows peak near 440 Hz
-- [ ] debug.html "Test Silence" shows near-zero values
-- [ ] debug.html microphone input shows visualization
-- [ ] index.html displays real-time visualization
+- [ ] test.html shows all data tests passing (Tests 1-10)
+
+**Visual Rendering Tests (test.html):**
+- [ ] Silence canvas shows dark/black bars
+- [ ] 440 Hz sine canvas shows colored peak
+- [ ] Peak appears in correct position (around middle of spectrum)
+- [ ] Rainbow colors visible across spectrum (red-orange-yellow-green-blue)
+- [ ] Multi-frequency canvas shows 2+ distinct peaks
+- [ ] High gain canvas is brighter than normal gain
+- [ ] Frequency labels visible and positioned correctly
+
+**Interactive Tests (debug.html):**
+- [ ] "Test 440 Hz Sine" shows visual peak near 440 Hz
+- [ ] "Test Silence" shows flat dark spectrum
+- [ ] Microphone input shows live visualization
+- [ ] Debug console shows detailed output
+
+**Main Application (index.html):**
+- [ ] Real-time visualization displays with microphone
 - [ ] Gain slider affects visualization brightness
 - [ ] Resolution slider changes number of bars
 - [ ] FPS counter shows ~60 fps
 - [ ] Frequency labels appear at bottom
+- [ ] Rainbow colors visible across spectrum
 - [ ] No console errors during normal operation
 
 ## Debugging Tips

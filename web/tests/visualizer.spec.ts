@@ -13,7 +13,7 @@ test.describe('KatVisualizer Web', () => {
     // Check that the start button exists
     const startBtn = page.locator('#start-btn');
     await expect(startBtn).toBeVisible();
-    await expect(startBtn).toHaveText('Click to Start');
+    await expect(startBtn).toHaveText('Click to Start (or drop audio file)');
 
     // Check that the settings button exists
     const settingsBtn = page.locator('#settings-btn');

@@ -120,6 +120,62 @@
         #start-btn.hidden {
             display: none;
         }
+        #drop-zone {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.8);
+            border: 4px dashed #666;
+            z-index: 200;
+        }
+        #drop-zone.active {
+            display: flex;
+        }
+        #drop-zone span {
+            font-size: 24px;
+            color: #888;
+        }
+        #audio-controls {
+            position: absolute;
+            bottom: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: none;
+            gap: 12px;
+            align-items: center;
+            background: rgba(30, 30, 30, 0.9);
+            padding: 8px 16px;
+            border-radius: 4px;
+            border: 1px solid #444;
+        }
+        #audio-controls.visible {
+            display: flex;
+        }
+        #audio-controls button {
+            padding: 6px 12px;
+            background: #333;
+            border: 1px solid #555;
+            color: #e0e0e0;
+            cursor: pointer;
+            font-family: monospace;
+        }
+        #audio-controls button:hover {
+            background: #444;
+        }
+        #audio-controls #file-name {
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        #audio-controls input[type="range"] {
+            width: 100px;
+        }
     </style>
 </head>
 <body>
@@ -148,7 +204,15 @@
                 <span id="bargraph-height-val">33%</span>
             </div>
         </div>
-        <button id="start-btn">Click to Start</button>
+        <button id="start-btn">Click to Start (or drop audio file)</button>
+        <div id="drop-zone"><span>Drop audio file here</span></div>
+        <div id="audio-controls">
+            <button id="play-pause-btn">Play</button>
+            <input type="range" id="seek-bar" min="0" max="100" value="0">
+            <span id="time-display">0:00 / 0:00</span>
+            <input type="range" id="volume-slider" min="0" max="100" value="100">
+            <span id="file-name"></span>
+        </div>
     </div>
 
     <script type="module">
@@ -156,13 +220,20 @@
 
         let visualizer = null;
         let audioContext = null;
-        let analyserNode = null;
         let scriptProcessor = null;
         let isRunning = false;
         let lastFrameTime = 0;
         let frameTime = 0;
         let rasterizeTime = 0;
         let processingTime = 0;
+
+        // Audio file playback state
+        let audioBuffer = null;
+        let audioSource = null;
+        let gainNode = null;
+        let isPlaying = false;
+        let startTime = 0;
+        let pauseTime = 0;
 
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
@@ -171,6 +242,13 @@
         const settingsBtn = document.getElementById('settings-btn');
         const settingsPanel = document.getElementById('settings-panel');
         const startBtn = document.getElementById('start-btn');
+        const dropZone = document.getElementById('drop-zone');
+        const audioControls = document.getElementById('audio-controls');
+        const playPauseBtn = document.getElementById('play-pause-btn');
+        const seekBar = document.getElementById('seek-bar');
+        const timeDisplay = document.getElementById('time-display');
+        const volumeSlider = document.getElementById('volume-slider');
+        const fileNameDisplay = document.getElementById('file-name');
 
         function resizeCanvas() {
             const dpr = window.devicePixelRatio || 1;
@@ -307,6 +385,205 @@ ${processPct}% (${processMs}ms) processing`;
         }
 
         startBtn.addEventListener('click', startAudio);
+
+        // Drag and drop handling
+        document.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('active');
+        });
+
+        document.addEventListener('dragleave', (e) => {
+            if (e.relatedTarget === null || !document.contains(e.relatedTarget)) {
+                dropZone.classList.remove('active');
+            }
+        });
+
+        dropZone.addEventListener('dragleave', (e) => {
+            if (!dropZone.contains(e.relatedTarget)) {
+                dropZone.classList.remove('active');
+            }
+        });
+
+        document.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('active');
+
+            const file = e.dataTransfer.files[0];
+            if (file && file.type.startsWith('audio/')) {
+                await loadAudioFile(file);
+            }
+        });
+
+        async function loadAudioFile(file) {
+            try {
+                // Initialize audio context and visualizer if needed
+                if (!audioContext) {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                }
+                if (!visualizer) {
+                    await init();
+                    visualizer = new Visualizer(audioContext.sampleRate, 512);
+                    resizeCanvas();
+                }
+
+                // Stop any current playback
+                stopAudio();
+
+                // Decode audio file
+                const arrayBuffer = await file.arrayBuffer();
+                audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+                // Set up gain node
+                if (!gainNode) {
+                    gainNode = audioContext.createGain();
+                    gainNode.connect(audioContext.destination);
+                }
+
+                // Update UI
+                fileNameDisplay.textContent = file.name;
+                audioControls.classList.add('visible');
+                startBtn.classList.add('hidden');
+                seekBar.value = 0;
+                updateTimeDisplay(0);
+
+                // Start playback
+                playAudio(0);
+
+                // Start visualization if not running
+                if (!isRunning) {
+                    isRunning = true;
+                    requestAnimationFrame(render);
+                }
+
+            } catch (err) {
+                console.error('Error loading audio file:', err);
+                alert('Could not load audio file: ' + err.message);
+            }
+        }
+
+        function playAudio(offset = pauseTime) {
+            if (!audioBuffer) return;
+
+            // Create new source (sources can only be used once)
+            audioSource = audioContext.createBufferSource();
+            audioSource.buffer = audioBuffer;
+
+            // Create script processor for visualization
+            const bufferSize = 2048;
+            if (scriptProcessor) {
+                scriptProcessor.disconnect();
+            }
+            scriptProcessor = audioContext.createScriptProcessor(bufferSize, 2, 2);
+
+            scriptProcessor.onaudioprocess = (e) => {
+                const processStart = performance.now();
+
+                const leftChannel = e.inputBuffer.getChannelData(0);
+                const rightChannel = e.inputBuffer.numberOfChannels > 1
+                    ? e.inputBuffer.getChannelData(1)
+                    : leftChannel;
+
+                if (audioBuffer.numberOfChannels === 1) {
+                    visualizer.process_mono(leftChannel);
+                } else {
+                    visualizer.process_stereo(leftChannel, rightChannel);
+                }
+
+                processingTime = performance.now() - processStart;
+            };
+
+            // Connect: source -> scriptProcessor -> gain -> destination
+            audioSource.connect(scriptProcessor);
+            scriptProcessor.connect(gainNode);
+
+            audioSource.onended = () => {
+                if (isPlaying && getCurrentTime() >= audioBuffer.duration - 0.1) {
+                    stopAudio();
+                    pauseTime = 0;
+                    seekBar.value = 0;
+                    updateTimeDisplay(0);
+                }
+            };
+
+            startTime = audioContext.currentTime - offset;
+            audioSource.start(0, offset);
+            isPlaying = true;
+            playPauseBtn.textContent = 'Pause';
+        }
+
+        function pauseAudio() {
+            if (!isPlaying) return;
+            pauseTime = getCurrentTime();
+            audioSource.stop();
+            isPlaying = false;
+            playPauseBtn.textContent = 'Play';
+        }
+
+        function stopAudio() {
+            if (audioSource) {
+                try { audioSource.stop(); } catch (e) {}
+                audioSource = null;
+            }
+            isPlaying = false;
+            playPauseBtn.textContent = 'Play';
+        }
+
+        function getCurrentTime() {
+            if (!isPlaying) return pauseTime;
+            return audioContext.currentTime - startTime;
+        }
+
+        function formatTime(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        function updateTimeDisplay(currentTime) {
+            const duration = audioBuffer ? audioBuffer.duration : 0;
+            timeDisplay.textContent = `${formatTime(currentTime)} / ${formatTime(duration)}`;
+        }
+
+        // Playback controls
+        playPauseBtn.addEventListener('click', () => {
+            if (isPlaying) {
+                pauseAudio();
+            } else {
+                playAudio();
+            }
+        });
+
+        seekBar.addEventListener('input', () => {
+            if (!audioBuffer) return;
+            const seekTime = (seekBar.value / 100) * audioBuffer.duration;
+            updateTimeDisplay(seekTime);
+        });
+
+        seekBar.addEventListener('change', () => {
+            if (!audioBuffer) return;
+            const seekTime = (seekBar.value / 100) * audioBuffer.duration;
+            const wasPlaying = isPlaying;
+            stopAudio();
+            pauseTime = seekTime;
+            if (wasPlaying) {
+                playAudio(seekTime);
+            }
+        });
+
+        volumeSlider.addEventListener('input', () => {
+            if (gainNode) {
+                gainNode.gain.value = volumeSlider.value / 100;
+            }
+        });
+
+        // Update seek bar during playback
+        setInterval(() => {
+            if (isPlaying && audioBuffer) {
+                const currentTime = getCurrentTime();
+                seekBar.value = (currentTime / audioBuffer.duration) * 100;
+                updateTimeDisplay(currentTime);
+            }
+        }, 100);
 
         // Initialize canvas on load
         resizeCanvas();

@@ -41,7 +41,8 @@ mod wasm_app {
     }
 
     impl WebVisualizer {
-        pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+        pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+             cc.egui_ctx.set_theme(egui::ThemePreference::Dark);
              let settings = RenderSettings::default();
              let mut color_table = ColorTable::new();
              color_table.build(

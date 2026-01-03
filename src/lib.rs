@@ -1,36 +1,45 @@
 // TODO: Go through https://nnethercote.github.io/perf-book/title-page.html and apply applicable optimizations
 
-#[cfg(not(debug_assertions))]
+#[cfg(all(not(debug_assertions), not(target_arch = "wasm32")))]
 use mimalloc::MiMalloc;
 
+#[cfg(not(target_arch = "wasm32"))]
 use nih_plug::{
     midi::control_change::{ALL_NOTES_OFF, POLY_MODE_ON},
     prelude::*,
     util::StftHelper,
     util::freq_to_midi_note,
 };
+#[cfg(not(target_arch = "wasm32"))]
 use nih_plug_egui::EguiState;
 use parking_lot::{FairMutex, Mutex, RwLock};
+#[cfg(not(target_arch = "wasm32"))]
 use rosc::{OscArray, OscBundle, OscMessage, OscPacket, OscTime, OscType, encoder};
 use std::{
-    net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, UdpSocket},
     num::NonZero,
     sync::Arc,
-    time::{Duration, Instant, SystemTime},
+    time::{Duration, SystemTime},
 };
+use web_time::Instant;
+#[cfg(not(target_arch = "wasm32"))]
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, UdpSocket};
+#[cfg(not(target_arch = "wasm32"))]
 use threadpool::ThreadPool;
 
-#[cfg(not(debug_assertions))]
+#[cfg(all(not(debug_assertions), not(target_arch = "wasm32")))]
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
 use crate::analyzer::{
     BetterAnalyzer, BetterAnalyzerConfiguration, BetterSpectrogram, amplitude_to_dbfs,
-    dbfs_to_amplitude, map_value_f32,
+    dbfs_to_amplitude, map_value_f32, AnalysisChainConfig,
 };
 
 pub mod analyzer;
+#[cfg(not(target_arch = "wasm32"))]
 mod editor;
+pub mod common;
+pub mod ui;
 
 #[derive(Clone, Copy)]
 pub(crate) struct AnalysisMetrics {
@@ -38,12 +47,17 @@ pub(crate) struct AnalysisMetrics {
     finished: Instant,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct PluginStateInfo {
     audio_io_layout: AudioIOLayout,
     buffer_config: BufferConfig,
 }
 
+#[cfg(target_arch = "wasm32")]
+pub(crate) type PluginStateInfo = ();
+
+#[cfg(not(target_arch = "wasm32"))]
 pub struct MyPlugin {
     params: Arc<PluginParams>,
     analysis_chain: Arc<Mutex<Option<AnalysisChain>>>,
@@ -56,16 +70,16 @@ pub struct MyPlugin {
     state_info: Arc<RwLock<Option<PluginStateInfo>>>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Params)]
 pub struct PluginParams {
     #[persist = "editor-state"]
     editor_state: Arc<EguiState>,
 }
 
-const MAX_FREQUENCY_BINS: usize = 2048;
-const SPECTROGRAM_SLICES: usize = 8192;
-const MAX_OSC_FREQUENCY_BINS: usize = 320;
+use crate::common::{MAX_FREQUENCY_BINS, SPECTROGRAM_SLICES, MAX_OSC_FREQUENCY_BINS};
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Default for MyPlugin {
     fn default() -> Self {
         Self {
@@ -88,6 +102,7 @@ impl Default for MyPlugin {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Default for PluginParams {
     fn default() -> Self {
         Self {
@@ -96,6 +111,7 @@ impl Default for PluginParams {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Plugin for MyPlugin {
     const NAME: &'static str = "KatVisualizer";
     const VENDOR: &'static str = "transkatgirl";
@@ -319,77 +335,7 @@ impl Plugin for MyPlugin {
     }
 }
 
-#[derive(Clone)]
-pub(crate) struct AnalysisChainConfig {
-    gain: f64,
-    listening_volume: f64,
-    normalize_amplitude: bool,
-    masking: bool,
-    internal_buffering: bool,
-    update_rate_hz: f64,
-    latency_offset: Duration,
-
-    output_osc: bool,
-    osc_socket_address: String,
-    osc_resource_address_frequencies: String,
-    osc_resource_address_stats: String,
-    output_midi: bool,
-    midi_max_simultaneous_tones: usize,
-    midi_tone_amplitude_threshold: f32,
-    midi_pressure_min_amplitude: f32,
-    midi_pressure_max_amplitude: f32,
-
-    resolution: usize,
-    start_frequency: f64,
-    end_frequency: f64,
-    erb_frequency_scale: bool,
-    erb_time_resolution: bool,
-    erb_bandwidth_divisor: f64,
-    time_resolution_clamp: (f64, f64),
-    q_time_resolution: f64,
-    nc_method: bool,
-}
-
-impl Default for AnalysisChainConfig {
-    fn default() -> Self {
-        Self {
-            gain: 0.0,
-            listening_volume: 86.0,
-            normalize_amplitude: true,
-            masking: true,
-            internal_buffering: true,
-            update_rate_hz: 2048.0,
-            resolution: 512,
-            latency_offset: Duration::ZERO,
-
-            output_osc: false,
-            osc_socket_address: "127.0.0.1:8000".to_string(),
-            osc_resource_address_frequencies: format!(
-                "/katvisualizer/v{}/frequencies",
-                env!("CARGO_PKG_VERSION")
-            ),
-            osc_resource_address_stats: format!(
-                "/katvisualizer/v{}/stats",
-                env!("CARGO_PKG_VERSION")
-            ),
-            output_midi: false,
-            midi_max_simultaneous_tones: 24,
-            midi_tone_amplitude_threshold: 30.0 - 86.0,
-            midi_pressure_min_amplitude: 30.0 - 86.0,
-            midi_pressure_max_amplitude: 70.0 - 86.0,
-
-            start_frequency: BetterAnalyzerConfiguration::default().start_frequency,
-            end_frequency: BetterAnalyzerConfiguration::default().end_frequency,
-            erb_frequency_scale: BetterAnalyzerConfiguration::default().erb_frequency_scale,
-            erb_time_resolution: BetterAnalyzerConfiguration::default().erb_time_resolution,
-            erb_bandwidth_divisor: BetterAnalyzerConfiguration::default().erb_bandwidth_divisor,
-            time_resolution_clamp: BetterAnalyzerConfiguration::default().time_resolution_clamp,
-            q_time_resolution: BetterAnalyzerConfiguration::default().q_time_resolution,
-            nc_method: BetterAnalyzerConfiguration::default().nc_method,
-        }
-    }
-}
-
+#[cfg(not(target_arch = "wasm32"))]
 #[allow(clippy::type_complexity)]
 pub(crate) struct AnalysisChain {
     chunker: StftHelper<0>,
@@ -422,6 +368,7 @@ pub(crate) struct AnalysisChain {
     osc_output: Arc<Mutex<Vec<(f32, f32, f32, f32, f32)>>>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl AnalysisChain {
     fn new(
         config: &AnalysisChainConfig,
@@ -1060,6 +1007,7 @@ impl AnalysisChain {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl ClapPlugin for MyPlugin {
     const CLAP_ID: &'static str = "com.transkatgirl.katvisualizer";
     const CLAP_DESCRIPTION: Option<&'static str> = None;
@@ -1073,11 +1021,14 @@ impl ClapPlugin for MyPlugin {
     ];
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Vst3Plugin for MyPlugin {
     const VST3_CLASS_ID: [u8; 16] = *b"transkatgirlVizu";
     const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] =
         &[Vst3SubCategory::Fx, Vst3SubCategory::Analyzer];
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 nih_export_clap!(MyPlugin);
+#[cfg(not(target_arch = "wasm32"))]
 nih_export_vst3!(MyPlugin);

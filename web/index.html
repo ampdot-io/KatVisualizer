@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>KatVisualizer WASM</title>
+    <style>
+        body { margin: 0; background-color: #202020; color: white; font-family: sans-serif; height: 100vh; display: flex; flex-direction: column; }
+        canvas { width: 100%; height: 100%; display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="the_canvas_id"></canvas>
+    <script type="module">
+        import init from './katvisualizer_wasm.js';
+
+        async function run() {
+            await init();
+        }
+
+        run();
+    </script>
+</body>
+</html>

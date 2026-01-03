@@ -23,10 +23,26 @@ python3 -m http.server 8080
 
 ## Test Pages
 
+### render-check.html (NEW - RECOMMENDED)
+**Quick rendering validation page** - Run this first!
+
+5 comprehensive tests:
+1. Canvas Comparison - Does rendering change the canvas?
+2. Pixel Analysis - How many pixels are modified?
+3. Bar Height Verification - Do bars have visible height?
+4. Spectrum Data Validation - Is analyzer returning values?
+5. Final Verdict - Overall pass/fail
+
+**Expected output**: "ALL TESTS PASSED - Visualizer is working correctly! ✓✓✓"
+
+**If broken**: "CRITICAL: Only 0/5 tests passed - Visualizer is BROKEN"
+
+This page will immediately tell you if rendering works at all.
+
 ### test.html
 Automated test suite that verifies:
 
-**Data Tests:**
+**Data Tests (1-10):**
 - WASM module loading
 - Frequency bin generation
 - Silence analysis (should return ~0 values)
@@ -36,18 +52,29 @@ Automated test suite that verifies:
 - Different resolutions (64, 256, 512 bins)
 - Memory stability
 
-**Visual Rendering Tests:**
-- Canvas renders silence as dark/black
-- Canvas renders sine wave with visible color
-- Peak appears at correct visual position
-- Rainbow color gradient across spectrum
-- Multiple frequencies show as separate visual peaks
-- Gain increases visual brightness
-- Frequency labels render at correct positions
+**Visual Rendering Tests (11-18):**
+- **Test 11**: Canvas comparison - CRITICAL baseline check
+  - Compares blank canvas vs rendered canvas
+  - FAILS immediately if nothing renders
+  - This catches "everything is black" bugs
+- **Test 12**: Silence renders as dark/black
+- **Test 13**: Sine wave renders with visible bars - STRICT VALIDATION
+  - Checks 3 criteria: hasColor, hasSignificantContent, brightPixelCount
+  - Shows detailed pixel analysis
+  - FAILS if max brightness < 80 or < 100 bright pixels
+- **Test 14**: Peak appears at correct visual position
+- **Test 15**: Rainbow color gradient across spectrum
+- **Test 16**: Multiple frequencies show as separate visual peaks
+- **Test 17**: Gain increases visual brightness
+- **Test 18**: Frequency labels render at correct positions
 
 **Expected output**: All tests should pass (green checkmarks) with visual spectrum renderings displayed
 
-Each visual test creates a canvas showing the actual rendered visualization, allowing both automated verification and manual inspection
+**Critical**: If Test 11 fails ("Canvas unchanged"), rendering is completely broken and all other visual tests will fail.
+
+Each visual test creates a canvas showing the actual rendered visualization, allowing both automated verification and manual inspection.
+
+See [TEST_IMPROVEMENTS.md](TEST_IMPROVEMENTS.md) for details on how tests detect rendering failures.
 
 ### debug.html
 Interactive debug viewer with:
@@ -71,17 +98,39 @@ Full application with:
 ## Common Issues
 
 ### No visualization appears
+**Quick diagnosis**: Open http://localhost:8080/render-check.html
+
+If Test 1 fails ("Canvas changes after rendering"):
+- Rendering is completely broken
+- Check WASM module built correctly
 - Check browser console for errors
-- Verify WASM module loaded (look for "Running" button status)
-- Check microphone permissions
+- Try rebuilding: `./build.sh`
+
+If all render-check tests pass but index.html shows nothing:
+- Check browser console for errors
+- Verify microphone permissions
+- Check Web Audio API initialization
 
 ### Spectrum shows all zeros
-- This was fixed - normalization formula was incorrect
+**Quick diagnosis**: Run render-check.html Test 4 ("Spectrum has signal")
+
+If max spectrum value < 0.01:
+- WASM analyzer is broken
+- Check that normalization formula is correct
 - Rebuild with `./build.sh` to get latest fixes
+
+### Tests pass but visualization looks wrong
+**Quick diagnosis**: Run test.html Tests 11-18
+
+- Test 11 fails: Nothing renders at all
+- Test 13 fails: Bars too dim or missing
+- Test 14 fails: Peak in wrong position
+- Test 15 fails: Colors not working
 
 ### Peak detection doesn't work
 - Ensure you're using test signals with sufficient amplitude (0.3-0.5)
 - Check that resolution is appropriate for frequency (higher resolution = better frequency accuracy)
+- Run render-check.html to verify bars are drawn
 
 ### Performance issues
 - Reduce resolution (try 128 or 64 bins)

@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Rendering Verification Test</title>
+    <style>
+        body {
+            font-family: monospace;
+            background: #1a1a1a;
+            color: #0f0;
+            padding: 20px;
+        }
+        .test { margin: 10px 0; }
+        .pass { color: #0f0; }
+        .fail { color: #f00; font-weight: bold; }
+        canvas {
+            border: 2px solid #333;
+            margin: 10px 0;
+            display: block;
+        }
+        .comparison {
+            display: flex;
+            gap: 20px;
+            margin: 20px 0;
+        }
+        .comparison canvas {
+            border: 2px solid #00f;
+        }
+    </style>
+</head>
+<body>
+    <h1>Visual Rendering Verification</h1>
+    <p>This test directly checks if the visualizer actually draws on canvas</p>
+
+    <div id="results"></div>
+
+    <script type="module">
+        import init, { MusicVisualizer } from './pkg/katvisualizer_wasm.js';
+
+        const results = document.getElementById('results');
+
+        function log(msg, isError = false) {
+            const div = document.createElement('div');
+            div.className = 'test ' + (isError ? 'fail' : 'pass');
+            div.textContent = (isError ? '✗ FAIL: ' : '✓ PASS: ') + msg;
+            results.appendChild(div);
+        }
+
+        function addHeader(text) {
+            const h2 = document.createElement('h2');
+            h2.textContent = text;
+            h2.style.color = '#0ff';
+            results.appendChild(h2);
+        }
+
+        function addCanvas(title, width = 800, height = 200) {
+            const h3 = document.createElement('h3');
+            h3.textContent = title;
+            results.appendChild(h3);
+
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            results.appendChild(canvas);
+
+            return canvas;
+        }
+
+        function canvasToDataURL(canvas) {
+            return canvas.toDataURL();
+        }
+
+        function canvasesAreIdentical(canvas1, canvas2) {
+            const data1 = canvas1.toDataURL();
+            const data2 = canvas2.toDataURL();
+            return data1 === data2;
+        }
+
+        function drawSpectrum(canvas, spectrum, frequencies) {
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width;
+            const h = canvas.height;
+            const bins = spectrum.length / 2;
+
+            // Clear with background color
+            ctx.fillStyle = '#0a0a0a';
+            ctx.fillRect(0, 0, w, h);
+
+            // Draw spectrum bars
+            const barWidth = w / bins;
+            for (let i = 0; i < bins; i++) {
+                const value = spectrum[i * 2 + 1];
+                const freq = frequencies[i];
+
+                const hue = Math.log2(freq / 20) / Math.log2(20000 / 20) * 360;
+                const lightness = 30 + value * 50;
+                const saturation = Math.min(100, value * 80);
+
+                ctx.fillStyle = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+
+                const barHeight = value * h * 0.8;
+                const x = i * barWidth;
+                const y = h - barHeight;
+
+                ctx.fillRect(x, y, barWidth - 1, barHeight);
+            }
+        }
+
+        async function runTest() {
+            try {
+                await init();
+                log('WASM module loaded');
+
+                const viz = new MusicVisualizer(128, 48000);
+                const freqs = viz.get_frequencies();
+
+                // ===== Test 1: Blank canvas comparison =====
+                addHeader('Test 1: Does drawing actually change the canvas?');
+
+                const blankCanvas = addCanvas('Blank Canvas (background only)');
+                const blankCtx = blankCanvas.getContext('2d');
+                blankCtx.fillStyle = '#0a0a0a';
+                blankCtx.fillRect(0, 0, blankCanvas.width, blankCanvas.height);
+                const blankData = canvasToDataURL(blankCanvas);
+
+                // Generate 440 Hz sine
+                const sampleRate = 48000;
+                const sineSamples = new Float32Array(4096);
+                for (let i = 0; i < sineSamples.length; i++) {
+                    sineSamples[i] = Math.sin(2 * Math.PI * 440 * i / sampleRate) * 0.5;
+                }
+
+                const result = viz.analyze(sineSamples);
+
+                const testCanvas = addCanvas('Test Canvas (440 Hz sine rendered)');
+                drawSpectrum(testCanvas, result, freqs);
+                const testData = canvasToDataURL(testCanvas);
+
+                if (blankData === testData) {
+                    log('Canvas did NOT change after rendering!', true);
+                    log('This means the visualizer is completely broken - no rendering occurs', true);
+                } else {
+                    log('Canvas changed after rendering (this is good!)');
+                }
+
+                // ===== Test 2: Pixel-level verification =====
+                addHeader('Test 2: Pixel-level analysis');
+
+                const ctx = testCanvas.getContext('2d');
+                const imageData = ctx.getImageData(0, 0, testCanvas.width, testCanvas.height);
+                const pixels = imageData.data;
+
+                const BACKGROUND_RGB = 10; // #0a0a0a
+                let changedPixels = 0;
+                let maxR = 0, maxG = 0, maxB = 0;
+
+                for (let i = 0; i < pixels.length; i += 4) {
+                    const r = pixels[i];
+                    const g = pixels[i + 1];
+                    const b = pixels[i + 2];
+
+                    if (r !== BACKGROUND_RGB || g !== BACKGROUND_RGB || b !== BACKGROUND_RGB) {
+                        changedPixels++;
+                    }
+
+                    maxR = Math.max(maxR, r);
+                    maxG = Math.max(maxG, g);
+                    maxB = Math.max(maxB, b);
+                }
+
+                const totalPixels = testCanvas.width * testCanvas.height;
+                const changedPercent = (changedPixels / totalPixels * 100).toFixed(2);
+
+                log(`Changed pixels: ${changedPixels} out of ${totalPixels} (${changedPercent}%)`);
+                log(`Max RGB values: R=${maxR}, G=${maxG}, B=${maxB}`);
+
+                if (changedPixels === 0) {
+                    log('ZERO pixels changed from background!', true);
+                    log('Visualizer is rendering nothing - completely broken', true);
+                } else if (changedPixels < 100) {
+                    log(`Only ${changedPixels} pixels changed - too few!`, true);
+                    log('Visualizer is barely rendering anything', true);
+                } else {
+                    log(`Sufficient pixels changed (${changedPixels})`);
+                }
+
+                if (maxR <= BACKGROUND_RGB && maxG <= BACKGROUND_RGB && maxB <= BACKGROUND_RGB) {
+                    log('All pixels are background color or darker!', true);
+                    log('No bars were drawn', true);
+                } else {
+                    log(`Bright pixels found: max RGB (${maxR}, ${maxG}, ${maxB})`);
+                }
+
+                // ===== Test 3: Expected bar heights =====
+                addHeader('Test 3: Bar height verification');
+
+                // Check that some bars actually have height > 0
+                const barWidth = testCanvas.width / (freqs.length);
+                let barsWithHeight = 0;
+
+                for (let bin = 0; bin < freqs.length; bin++) {
+                    const value = result[bin * 2 + 1];
+                    const x = Math.floor(bin * barWidth);
+                    const barHeight = value * testCanvas.height * 0.8;
+
+                    if (barHeight > 5) {
+                        barsWithHeight++;
+                    }
+                }
+
+                log(`Bars with height > 5px: ${barsWithHeight} out of ${freqs.length}`);
+
+                if (barsWithHeight === 0) {
+                    log('NO bars have any height!', true);
+                    log('All spectrum values are near zero - analyzer not working', true);
+                } else if (barsWithHeight < 5) {
+                    log(`Only ${barsWithHeight} bars visible - very weak signal`, true);
+                } else {
+                    log(`${barsWithHeight} bars are visible (good)`);
+                }
+
+                // ===== Test 4: Spectrum value verification =====
+                addHeader('Test 4: Spectrum data validation');
+
+                let nonZeroValues = 0;
+                let maxValue = 0;
+                let sumValues = 0;
+
+                for (let i = 0; i < result.length / 2; i++) {
+                    const value = result[i * 2 + 1];
+                    if (value > 0.01) nonZeroValues++;
+                    if (value > maxValue) maxValue = value;
+                    sumValues += value;
+                }
+
+                const avgValue = sumValues / (result.length / 2);
+
+                log(`Non-zero spectrum values: ${nonZeroValues} out of ${result.length / 2}`);
+                log(`Max spectrum value: ${maxValue.toFixed(4)}`);
+                log(`Average spectrum value: ${avgValue.toFixed(4)}`);
+
+                if (maxValue < 0.01) {
+                    log('Max spectrum value is essentially zero!', true);
+                    log('WASM analyzer is returning all zeros', true);
+                } else if (maxValue < 0.1) {
+                    log(`Max value ${maxValue.toFixed(4)} is very low - weak output`, true);
+                } else {
+                    log(`Max value ${maxValue.toFixed(4)} is reasonable`);
+                }
+
+                // ===== Final Verdict =====
+                addHeader('FINAL VERDICT');
+
+                const tests = [
+                    { name: 'Canvas changes after rendering', pass: blankData !== testData },
+                    { name: 'Pixels are modified', pass: changedPixels > 100 },
+                    { name: 'Bright pixels exist', pass: maxR > BACKGROUND_RGB || maxG > BACKGROUND_RGB || maxB > BACKGROUND_RGB },
+                    { name: 'Bars have height', pass: barsWithHeight > 5 },
+                    { name: 'Spectrum has signal', pass: maxValue > 0.1 }
+                ];
+
+                const passCount = tests.filter(t => t.pass).length;
+
+                results.appendChild(document.createElement('hr'));
+
+                tests.forEach(test => {
+                    log(test.name, !test.pass);
+                });
+
+                results.appendChild(document.createElement('hr'));
+
+                if (passCount === tests.length) {
+                    log('ALL TESTS PASSED - Visualizer is working correctly! ✓✓✓');
+                } else if (passCount >= 3) {
+                    log(`${passCount}/${tests.length} tests passed - Some issues detected`, true);
+                } else {
+                    log(`CRITICAL: Only ${passCount}/${tests.length} tests passed - Visualizer is BROKEN`, true);
+                }
+
+            } catch (err) {
+                log('FATAL ERROR: ' + err.message, true);
+                console.error(err);
+            }
+        }
+
+        runTest();
+    </script>
+</body>
+</html>

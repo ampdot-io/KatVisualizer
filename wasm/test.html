@@ -199,29 +199,82 @@
                 // Visual Tests
                 log('\n=== Visual Rendering Tests ===');
 
-                // Test 11: Canvas rendering - Silence
+                // Test 11: Canvas comparison - Does rendering actually work?
+                log('Testing if rendering actually modifies canvas...');
+                const blankCanvas = document.createElement('canvas');
+                blankCanvas.width = 800;
+                blankCanvas.height = 200;
+                const blankCtx = blankCanvas.getContext('2d');
+                blankCtx.fillStyle = '#0a0a0a';
+                blankCtx.fillRect(0, 0, 800, 200);
+                const blankData = blankCanvas.toDataURL();
+
+                const testCanvas = document.createElement('canvas');
+                testCanvas.width = 800;
+                testCanvas.height = 200;
+                drawSpectrum(testCanvas, sineResult, freqs);
+                const testData = testCanvas.toDataURL();
+
+                if (blankData === testData) {
+                    log('CRITICAL ERROR: Canvas unchanged after rendering!', true);
+                    log('  This means the visualizer draws NOTHING', true);
+                    log('  All visual tests will fail because rendering is completely broken', true);
+                } else {
+                    log('Canvas modified by rendering (baseline check passed)');
+                }
+
+                // Test 12: Canvas rendering - Silence
                 log('Testing visual rendering of silence...');
                 const silenceCanvas = createCanvas('silence-test', 800, 200);
                 drawSpectrum(silenceCanvas, silenceResult, freqs, 'Silence (should be dark/black)');
                 const silencePixels = checkCanvasPixels(silenceCanvas);
-                if (silencePixels.hasColor) {
-                    log(`WARNING: Silence rendering shows significant color (avg brightness: ${silencePixels.avgBrightness.toFixed(2)})`, true);
+
+                logData('Silence pixel analysis', {
+                    avgBrightness: silencePixels.avgBrightness.toFixed(2),
+                    maxBrightness: silencePixels.maxBrightness.toFixed(2),
+                    nonBackgroundRatio: (silencePixels.nonBackgroundPixelRatio * 100).toFixed(2) + '%',
+                    brightPixelCount: silencePixels.brightPixelCount
+                });
+
+                if (silencePixels.hasColor || silencePixels.maxBrightness > 50) {
+                    log(`ERROR: Silence shows unexpected rendering (max brightness: ${silencePixels.maxBrightness.toFixed(2)})`, true);
                 } else {
-                    log(`Silence renders correctly (avg brightness: ${silencePixels.avgBrightness.toFixed(2)})`);
+                    log(`Silence renders correctly as dark`);
                 }
 
-                // Test 12: Canvas rendering - 440 Hz Sine
+                // Test 13: Canvas rendering - 440 Hz Sine
                 log('Testing visual rendering of 440 Hz sine wave...');
                 const sineCanvas = createCanvas('sine-test', 800, 200);
                 drawSpectrum(sineCanvas, sineResult, freqs, '440 Hz Sine Wave');
                 const sinePixels = checkCanvasPixels(sineCanvas);
+
+                logData('Sine wave pixel analysis', {
+                    avgBrightness: sinePixels.avgBrightness.toFixed(2),
+                    maxBrightness: sinePixels.maxBrightness.toFixed(2),
+                    nonBackgroundRatio: (sinePixels.nonBackgroundPixelRatio * 100).toFixed(2) + '%',
+                    brightPixelCount: sinePixels.brightPixelCount,
+                    hasSignificantContent: sinePixels.hasSignificantContent
+                });
+
                 if (!sinePixels.hasColor) {
-                    log('ERROR: Sine wave rendering shows no color!', true);
-                } else {
-                    log(`Sine wave renders with color (avg brightness: ${sinePixels.avgBrightness.toFixed(2)})`);
+                    log('ERROR: Sine wave shows NO visible bars above background!', true);
+                    log('  This means the visualizer is not rendering anything', true);
+                }
+                if (!sinePixels.hasSignificantContent) {
+                    log('ERROR: No bright pixels detected (max brightness < 80)!', true);
+                    log('  Expected bright peaks for 440 Hz sine wave', true);
+                }
+                if (sinePixels.brightPixelCount < 100) {
+                    log(`ERROR: Only ${sinePixels.brightPixelCount} bright pixels - too few for visible signal!`, true);
                 }
 
-                // Test 13: Peak position verification
+                if (sinePixels.hasColor && sinePixels.hasSignificantContent && sinePixels.brightPixelCount >= 100) {
+                    log(`Sine wave renders correctly with visible bars`);
+                } else {
+                    log('CRITICAL: Sine wave rendering FAILED - visualizer not working!', true);
+                }
+
+                // Test 14: Peak position verification
                 log('Testing peak appears at correct visual position...');
                 const peakBinVisual = findPeakBin(sineResult);
                 const expectedX = (peakBinVisual / (freqs.length)) * sineCanvas.width;
@@ -234,7 +287,7 @@
                     log('Peak region shows expected brightness');
                 }
 
-                // Test 14: Color gradient verification
+                // Test 15: Color gradient verification
                 log('Testing rainbow color gradient across spectrum...');
                 const colorTest = verifyColorGradient(sineCanvas);
                 if (colorTest.hasGradient) {
@@ -249,7 +302,7 @@
                     blueAvg: colorTest.avgBlue.toFixed(1)
                 });
 
-                // Test 15: Multi-frequency visual separation
+                // Test 16: Multi-frequency visual separation
                 log('Testing visual separation of multiple frequencies...');
                 const multiCanvas = createCanvas('multi-test', 800, 200);
                 drawSpectrum(multiCanvas, mixResult, freqs, '220 Hz + 880 Hz Mix');
@@ -265,7 +318,7 @@
                     })));
                 }
 
-                // Test 16: Gain visual effect
+                // Test 17: Gain visual effect
                 log('Testing gain affects visual brightness...');
                 const normalCanvas = createCanvas('normal-gain-test', 400, 100);
                 const highGainCanvas = createCanvas('high-gain-test', 400, 100);
@@ -292,7 +345,7 @@
                     log(`Gain correctly increases brightness by ${increase}%`);
                 }
 
-                // Test 17: Frequency label positioning
+                // Test 18: Frequency label positioning
                 log('Testing frequency labels render at correct positions...');
                 const labelCanvas = createCanvas('label-test', 1200, 300);
                 drawSpectrumWithLabels(labelCanvas, sineResult, freqs);
@@ -403,9 +456,15 @@
             const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
             const pixels = imageData.data;
 
+            const BACKGROUND_BRIGHTNESS = 10; // #0a0a0a background
+            const THRESHOLD_ABOVE_BG = 30; // Must be significantly brighter than background
+
             let totalBrightness = 0;
             let colorPixels = 0;
+            let brightPixels = 0;
             let totalPixels = 0;
+            let maxBrightness = 0;
+            let nonBackgroundPixels = 0;
 
             for (let i = 0; i < pixels.length; i += 4) {
                 const r = pixels[i];
@@ -416,18 +475,33 @@
                 totalBrightness += brightness;
                 totalPixels++;
 
+                if (brightness > maxBrightness) {
+                    maxBrightness = brightness;
+                }
+
+                // Count pixels significantly above background
+                if (brightness > BACKGROUND_BRIGHTNESS + THRESHOLD_ABOVE_BG) {
+                    nonBackgroundPixels++;
+                    brightPixels++;
+                }
+
                 if (brightness > 20) {
                     colorPixels++;
                 }
             }
 
             const avgBrightness = totalBrightness / totalPixels;
-            const hasColor = avgBrightness > 15 && colorPixels > (totalPixels * 0.01);
+            const hasColor = nonBackgroundPixels > (totalPixels * 0.005); // At least 0.5% must be visible bars
+            const hasSignificantContent = maxBrightness > 80; // At least some bright pixels
 
             return {
                 avgBrightness,
                 hasColor,
-                colorPixelRatio: colorPixels / totalPixels
+                colorPixelRatio: colorPixels / totalPixels,
+                nonBackgroundPixelRatio: nonBackgroundPixels / totalPixels,
+                maxBrightness,
+                hasSignificantContent,
+                brightPixelCount: brightPixels
             };
         }
 

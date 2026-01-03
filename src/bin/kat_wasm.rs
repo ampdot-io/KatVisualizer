@@ -18,6 +18,7 @@ mod wasm_app {
         context: Option<web_sys::AudioContext>,
         source: Option<web_sys::AudioBufferSourceNode>,
         processor: Option<web_sys::ScriptProcessorNode>,
+        oscillator: Option<web_sys::OscillatorNode>,
         closure: Option<Closure<dyn FnMut(web_sys::AudioProcessingEvent)>>,
     }
 
@@ -33,6 +34,10 @@ mod wasm_app {
 
         config_tx: Sender<AnalysisChainConfig>,
         config_rx: Receiver<AnalysisChainConfig>,
+
+        // Debug info
+        last_audio_state: String,
+        last_sample_rate: f32,
     }
 
     impl WebVisualizer {
@@ -85,16 +90,20 @@ mod wasm_app {
                 audio_state_container: None,
                 config_tx,
                 config_rx,
+                last_audio_state: "None".to_string(),
+                last_sample_rate: 0.0,
             }
         }
 
         fn update_analyzer(&mut self) {
+             let current_sample_rate = self.analyzer.lock().config().sample_rate;
+
              let analyzer_config = BetterAnalyzerConfiguration {
                  resolution: self.analysis_config.resolution,
                  start_frequency: self.analysis_config.start_frequency,
                  end_frequency: self.analysis_config.end_frequency,
                  erb_frequency_scale: self.analysis_config.erb_frequency_scale,
-                 sample_rate: self.analyzer.lock().config().sample_rate,
+                 sample_rate: current_sample_rate,
                  erb_time_resolution: self.analysis_config.erb_time_resolution,
                  erb_bandwidth_divisor: self.analysis_config.erb_bandwidth_divisor,
                  time_resolution_clamp: self.analysis_config.time_resolution_clamp,
@@ -115,14 +124,14 @@ mod wasm_app {
                 || old_config.q_time_resolution != analyzer_config.q_time_resolution
                 || old_config.nc_method != analyzer_config.nc_method
                 || old_config.masking != analyzer_config.masking
+                || old_config.sample_rate != analyzer_config.sample_rate
             {
                  *analyzer = BetterAnalyzer::new(analyzer_config);
                  self.frequencies = analyzer.frequencies().iter().map(|(a,b,c)| (*a as f32, *b as f32, *c as f32)).collect();
             }
         }
 
-        fn load_audio(&mut self, data: Vec<u8>) {
-            // Close previous context if exists
+        fn stop_audio(&mut self) {
             if let Some(container) = &self.audio_state_container {
                 let mut state = container.borrow_mut();
                 if let Some(ctx) = state.context.take() {
@@ -132,54 +141,101 @@ mod wasm_app {
                     let _ = source.stop();
                     let _ = source.disconnect();
                 }
+                if let Some(osc) = state.oscillator.take() {
+                    let _ = osc.stop();
+                    let _ = osc.disconnect();
+                }
                 if let Some(processor) = state.processor.take() {
                     let _ = processor.disconnect();
                 }
                 state.closure = None;
             }
+            self.audio_state_container = None;
+        }
+
+        fn init_audio_context(&mut self) -> Option<web_sys::AudioContext> {
+            self.stop_audio();
 
             let context = match web_sys::AudioContext::new() {
                 Ok(c) => c,
                 Err(e) => {
                     log::error!("Failed to create AudioContext: {:?}", e);
-                    return;
+                    return None;
                 }
             };
+
+            // Resume context immediately (needed for some browsers policy)
+            if context.state() == web_sys::AudioContextState::Suspended {
+                let _ = context.resume();
+            }
 
             let state_container = std::rc::Rc::new(std::cell::RefCell::new(AudioState {
                 context: Some(context.clone()),
                 source: None,
                 processor: None,
                 closure: None,
+                oscillator: None,
             }));
 
-            self.audio_state_container = Some(state_container.clone());
+            self.audio_state_container = Some(state_container);
 
-            let analyzer = self.analyzer.clone();
-            let spectrogram = self.spectrogram.clone();
-            let config = self.analysis_config.clone();
-
-            wasm_bindgen_futures::spawn_local(async move {
-                let array_buffer = js_sys::Uint8Array::from(&data[..]).buffer();
-                // context is inside state_container
-
-                let context_handle = {
-                    if let Some(ref c) = state_container.borrow().context {
-                        c.clone()
-                    } else {
-                        return;
-                    }
-                };
-
-                let decoded_res = JsFuture::from(context_handle.decode_audio_data(&array_buffer).unwrap()).await;
-
-                if let Ok(decoded) = decoded_res {
-                    let buffer: web_sys::AudioBuffer = decoded.into();
-                    start_playback(state_container, buffer, analyzer, spectrogram, config);
-                } else {
-                    log::error!("Failed to decode audio");
+            // Update analyzer sample rate
+            {
+                let mut analyzer = self.analyzer.lock();
+                let mut config = analyzer.config().clone();
+                if config.sample_rate != context.sample_rate() {
+                    log::info!("Updating analyzer sample rate to {}", context.sample_rate());
+                    config.sample_rate = context.sample_rate();
+                    *analyzer = BetterAnalyzer::new(config);
+                    self.frequencies = analyzer.frequencies().iter().map(|(a,b,c)| (*a as f32, *b as f32, *c as f32)).collect();
                 }
-            });
+            }
+
+            Some(context)
+        }
+
+        fn play_test_tone(&mut self) {
+            if let Some(context) = self.init_audio_context() {
+                let container = self.audio_state_container.as_ref().unwrap().clone();
+                let analyzer = self.analyzer.clone();
+                let spectrogram = self.spectrogram.clone();
+                let config = self.analysis_config.clone();
+
+                let oscillator = context.create_oscillator().unwrap();
+                oscillator.set_type(web_sys::OscillatorType::Sine);
+                oscillator.frequency().set_value(440.0);
+
+                start_processing(container.clone(), Some(oscillator), None, analyzer, spectrogram, config);
+            }
+        }
+
+        fn load_audio(&mut self, data: Vec<u8>) {
+            if let Some(_context) = self.init_audio_context() {
+                let container = self.audio_state_container.as_ref().unwrap().clone();
+                let analyzer = self.analyzer.clone();
+                let spectrogram = self.spectrogram.clone();
+                let config = self.analysis_config.clone();
+
+                wasm_bindgen_futures::spawn_local(async move {
+                    let array_buffer = js_sys::Uint8Array::from(&data[..]).buffer();
+                    let context_handle = {
+                        if let Some(ref c) = container.borrow().context {
+                            c.clone()
+                        } else {
+                            return;
+                        }
+                    };
+
+                    let decoded_res = JsFuture::from(context_handle.decode_audio_data(&array_buffer).unwrap()).await;
+
+                    if let Ok(decoded) = decoded_res {
+                        let buffer: web_sys::AudioBuffer = decoded.into();
+                        start_processing(container, None, Some(buffer), analyzer, spectrogram, config);
+                    } else {
+                        log::error!("Failed to decode audio");
+                    }
+                });
+            }
         }
     }
 
@@ -190,6 +246,15 @@ mod wasm_app {
              while let Ok(new_config) = self.config_rx.try_recv() {
                  self.analysis_config = new_config;
                  self.update_analyzer();
+             }
+
+             // Update status
+             if let Some(container) = &self.audio_state_container {
+                 let state = container.borrow();
+                 if let Some(ctx) = &state.context {
+                     self.last_audio_state = format!("{:?}", ctx.state());
+                     self.last_sample_rate = ctx.sample_rate();
+                 }
              }
 
              egui::CentralPanel::default().show(ctx, |ui| {
@@ -204,7 +269,22 @@ mod wasm_app {
 
                 if self.audio_state_container.is_none() {
                      ui.centered_and_justified(|ui| {
-                        ui.heading("Drag and drop audio file here");
+                        ui.vertical_centered(|ui| {
+                            ui.heading("Drag and drop audio file here");
+                            if ui.button("Play 440Hz Test Tone").clicked() {
+                                self.play_test_tone();
+                            }
+                        });
+                    });
+                } else {
+                    // Debug Overlay
+                    ui.scope(|ui| {
+                        ui.style_mut().visuals.widgets.noninteractive.bg_fill = egui::Color32::from_black_alpha(128);
+                        let frame = egui::Frame::window(ui.style());
+                        frame.show(ui, |ui| {
+                            ui.label(format!("Audio: {}", self.last_audio_state));
+                            ui.label(format!("SR: {:.0}Hz", self.last_sample_rate));
+                        });
                     });
                 }
 
@@ -233,24 +313,35 @@ mod wasm_app {
         }
     }
 
-    fn start_playback(
+    fn start_processing(
         state_container: std::rc::Rc<std::cell::RefCell<AudioState>>,
-        buffer: web_sys::AudioBuffer,
+        oscillator: Option<web_sys::OscillatorNode>,
+        buffer: Option<web_sys::AudioBuffer>,
         analyzer: Arc<Mutex<BetterAnalyzer>>,
         spectrogram: Arc<RwLock<BetterSpectrogram>>,
         config: AnalysisChainConfig
     ) {
-        let mut state = state_container.borrow_mut();
+        let context = {
+            let state = state_container.borrow();
+            if state.context.is_none() { return; }
+            state.context.as_ref().unwrap().clone()
+        };
 
-        // If context was closed or removed, abort
-        if state.context.is_none() { return; }
-        let context = state.context.as_ref().unwrap();
+        let source_node: web_sys::AudioNode;
 
-        let source_res = context.create_buffer_source();
-        if source_res.is_err() { return; }
-        let source = source_res.unwrap();
-
-        source.set_buffer(Some(&buffer));
+        if let Some(buf) = buffer {
+            let source = context.create_buffer_source().unwrap();
+            source.set_buffer(Some(&buf));
+            let _ = source.start();
+            state_container.borrow_mut().source = Some(source.clone());
+            source_node = source.into();
+        } else if let Some(osc) = oscillator {
+            let _ = osc.start();
+            state_container.borrow_mut().oscillator = Some(osc.clone());
+            source_node = osc.into();
+        } else {
+            return;
+        }
 
         let buffer_size = 2048;
         let processor_res = context.create_script_processor_with_buffer_size_and_number_of_input_channels_and_number_of_output_channels(
@@ -275,16 +366,19 @@ mod wasm_app {
                  analysis.update_mono(&analyzer, config.gain, if config.normalize_amplitude { Some(config.listening_volume) } else { None }, chunk_duration);
              });
 
+             // Pass through audio
+             let output_buffer = event.output_buffer().unwrap();
+             let mut output_data = output_buffer.get_channel_data(0).unwrap();
+             output_data.copy_from_slice(&input_data); // Copy input to output to hear it
+
          }) as Box<dyn FnMut(_)>);
 
          processor.set_onaudioprocess(Some(closure.as_ref().unchecked_ref()));
 
-         let _ = source.connect_with_audio_node(&processor);
+         let _ = source_node.connect_with_audio_node(&processor);
          let _ = processor.connect_with_audio_node(&context.destination());
 
-         let _ = source.start();
-
-         state.source = Some(source);
+         let mut state = state_container.borrow_mut();
          state.processor = Some(processor);
          state.closure = Some(closure);
     }

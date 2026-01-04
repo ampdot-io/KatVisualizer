@@ -57,7 +57,10 @@ mod wasm_app {
                 settings.maximum_chroma,
             );
 
-            let analysis_config = AnalysisChainConfig::default();
+            let mut analysis_config = AnalysisChainConfig::default();
+            // The WASM build runs single-threaded, so lighten the default workload.
+            analysis_config.update_rate_hz = 512.0;
+            analysis_config.resolution = 256;
 
             let analyzer_config = BetterAnalyzerConfiguration {
                 resolution: analysis_config.resolution,
@@ -336,6 +339,7 @@ mod wasm_app {
                         ui.vertical_centered(|ui| {
                             ui.heading("Drag and drop audio file here");
                             if ui.button("Play 440Hz Test Tone").clicked() {
+                                log::info!("Play test tone requested");
                                 self.play_test_tone();
                             }
                         });
@@ -410,9 +414,9 @@ mod wasm_app {
             return;
         }
 
-        let buffer_size = 2048;
+        let buffer_size = 1024;
         let processor_res = context.create_script_processor_with_buffer_size_and_number_of_input_channels_and_number_of_output_channels(
-             buffer_size, 1, 1);
+             buffer_size, 2, 2);
         if processor_res.is_err() {
             return;
         }
@@ -420,10 +424,31 @@ mod wasm_app {
 
         let sample_rate = context.sample_rate();
 
+        let processed_once = std::cell::Cell::new(false);
+
         let closure = Closure::wrap(Box::new(move |event: web_sys::AudioProcessingEvent| {
             let input_buffer = event.input_buffer().unwrap();
-            let input_data = input_buffer.get_channel_data(0).unwrap();
-            let samples: Vec<f64> = input_data.iter().map(|&s| s as f64).collect();
+            let channel_count = input_buffer.number_of_channels().max(1) as usize;
+
+            // Mix to mono for analysis while supporting stereo pass-through.
+            let input_data_left = input_buffer.get_channel_data(0).unwrap();
+            let input_data_right = if channel_count > 1 {
+                Some(input_buffer.get_channel_data(1).unwrap())
+            } else {
+                None
+            };
+
+            let samples: Vec<f64> = input_data_left
+                .iter()
+                .enumerate()
+                .map(|(i, &l)| {
+                    let r = input_data_right
+                        .as_ref()
+                        .and_then(|data| data.get(i).copied())
+                        .unwrap_or(l);
+                    ((l + r) * 0.5) as f64
+                })
+                .collect();
 
             let mut analyzer = analyzer.lock();
             analyzer.analyze(samples.into_iter(), None);
@@ -442,12 +467,33 @@ mod wasm_app {
                     },
                     chunk_duration,
                 );
+
+                if !processed_once.get() {
+                    log::info!(
+                        "Audio processing running; chunk {:.2}ms, max {:.2} dB, mean {:.2} dB",
+                        chunk_duration.as_secs_f64() * 1000.0,
+                        analysis.max,
+                        analysis.mean
+                    );
+                    processed_once.set(true);
+                }
             });
 
-            // Pass through audio
+            // Pass through audio (stereo when available)
             let output_buffer = event.output_buffer().unwrap();
-            let mut output_data = output_buffer.get_channel_data(0).unwrap();
-            output_data.copy_from_slice(&input_data); // Copy input to output to hear it
+            let mut output_left = output_buffer.get_channel_data(0).unwrap();
+            output_left.copy_from_slice(&input_data_left);
+            if let Some(mut output_right) = output_buffer
+                .get_channel_data(1)
+                .ok()
+                .filter(|_| channel_count > 1)
+            {
+                if let Some(right_in) = input_data_right {
+                    output_right.copy_from_slice(&right_in);
+                } else {
+                    output_right.copy_from_slice(&input_data_left);
+                }
+            }
         }) as Box<dyn FnMut(_)>);
 
         processor.set_onaudioprocess(Some(closure.as_ref().unchecked_ref()));

@@ -30,7 +30,8 @@ mod wasm_app {
     #[wasm_bindgen]
     pub struct WebVisualizer {
         shared_state: SharedState,
-        analyzer: Arc<Mutex<BetterAnalyzer>>,
+        left_analyzer: Arc<Mutex<BetterAnalyzer>>,
+        right_analyzer: Arc<Mutex<BetterAnalyzer>>,
         spectrogram: Arc<RwLock<BetterSpectrogram>>,
         analysis_config: AnalysisChainConfig,
         frequencies: Vec<(f32, f32, f32)>,
@@ -43,6 +44,7 @@ mod wasm_app {
         // Debug info
         last_audio_state: String,
         last_sample_rate: f32,
+        auto_start: bool,
     }
 
     impl WebVisualizer {
@@ -76,8 +78,9 @@ mod wasm_app {
                 masking: analysis_config.masking,
             };
 
-            let analyzer = BetterAnalyzer::new(analyzer_config);
-            let frequencies = analyzer
+            let left_analyzer = BetterAnalyzer::new(analyzer_config.clone());
+            let right_analyzer = BetterAnalyzer::new(analyzer_config);
+            let frequencies = left_analyzer
                 .frequencies()
                 .iter()
                 .map(|(a, b, c)| (*a as f32, *b as f32, *c as f32))
@@ -123,7 +126,8 @@ mod wasm_app {
 
             Self {
                 shared_state,
-                analyzer: Arc::new(Mutex::new(analyzer)),
+                left_analyzer: Arc::new(Mutex::new(left_analyzer)),
+                right_analyzer: Arc::new(Mutex::new(right_analyzer)),
                 spectrogram: Arc::new(RwLock::new(BetterSpectrogram::new(
                     SPECTROGRAM_SLICES,
                     MAX_FREQUENCY_BINS,
@@ -135,11 +139,12 @@ mod wasm_app {
                 config_rx,
                 last_audio_state: "None".to_string(),
                 last_sample_rate: 0.0,
+                auto_start: true,
             }
         }
 
         fn update_analyzer(&mut self) {
-            let current_sample_rate = self.analyzer.lock().config().sample_rate;
+            let current_sample_rate = self.left_analyzer.lock().config().sample_rate;
 
             let analyzer_config = BetterAnalyzerConfiguration {
                 resolution: self.analysis_config.resolution,
@@ -155,8 +160,8 @@ mod wasm_app {
                 masking: self.analysis_config.masking,
             };
 
-            let mut analyzer = self.analyzer.lock();
-            let old_config = analyzer.config();
+            let mut left_analyzer = self.left_analyzer.lock();
+            let old_config = left_analyzer.config();
             if old_config.resolution != analyzer_config.resolution
                 || old_config.start_frequency != analyzer_config.start_frequency
                 || old_config.end_frequency != analyzer_config.end_frequency
@@ -169,12 +174,15 @@ mod wasm_app {
                 || old_config.masking != analyzer_config.masking
                 || old_config.sample_rate != analyzer_config.sample_rate
             {
-                *analyzer = BetterAnalyzer::new(analyzer_config);
-                self.frequencies = analyzer
+                *left_analyzer = BetterAnalyzer::new(analyzer_config.clone());
+                self.frequencies = left_analyzer
                     .frequencies()
                     .iter()
                     .map(|(a, b, c)| (*a as f32, *b as f32, *c as f32))
                     .collect();
+
+                let mut right_analyzer = self.right_analyzer.lock();
+                *right_analyzer = BetterAnalyzer::new(analyzer_config);
             }
         }
 
@@ -228,13 +236,17 @@ mod wasm_app {
 
             // Update analyzer sample rate
             {
-                let mut analyzer = self.analyzer.lock();
-                let mut config = analyzer.config().clone();
+                let mut left = self.left_analyzer.lock();
+                let mut config = left.config().clone();
                 if config.sample_rate != context.sample_rate() {
                     log::info!("Updating analyzer sample rate to {}", context.sample_rate());
                     config.sample_rate = context.sample_rate();
-                    *analyzer = BetterAnalyzer::new(config);
-                    self.frequencies = analyzer
+                    *left = BetterAnalyzer::new(config.clone());
+
+                    let mut right = self.right_analyzer.lock();
+                    *right = BetterAnalyzer::new(config);
+
+                    self.frequencies = left
                         .frequencies()
                         .iter()
                         .map(|(a, b, c)| (*a as f32, *b as f32, *c as f32))
@@ -248,7 +260,8 @@ mod wasm_app {
         fn play_test_tone(&mut self) {
             if let Some(context) = self.init_audio_context() {
                 let container = self.audio_state_container.as_ref().unwrap().clone();
-                let analyzer = self.analyzer.clone();
+                let left_analyzer = self.left_analyzer.clone();
+                let right_analyzer = self.right_analyzer.clone();
                 let spectrogram = self.spectrogram.clone();
                 let config = self.analysis_config.clone();
 
@@ -260,7 +273,8 @@ mod wasm_app {
                     container.clone(),
                     Some(oscillator),
                     None,
-                    analyzer,
+                    left_analyzer,
+                    right_analyzer,
                     spectrogram,
                     config,
                 );
@@ -270,7 +284,8 @@ mod wasm_app {
         fn load_audio(&mut self, data: Vec<u8>) {
             if let Some(_context) = self.init_audio_context() {
                 let container = self.audio_state_container.as_ref().unwrap().clone();
-                let analyzer = self.analyzer.clone();
+                let left_analyzer = self.left_analyzer.clone();
+                let right_analyzer = self.right_analyzer.clone();
                 let spectrogram = self.spectrogram.clone();
                 let config = self.analysis_config.clone();
 
@@ -294,7 +309,8 @@ mod wasm_app {
                             container,
                             None,
                             Some(buffer),
-                            analyzer,
+                            left_analyzer,
+                            right_analyzer,
                             spectrogram,
                             config,
                         );
@@ -313,6 +329,11 @@ mod wasm_app {
             while let Ok(new_config) = self.config_rx.try_recv() {
                 self.analysis_config = new_config;
                 self.update_analyzer();
+            }
+
+            if self.auto_start && self.audio_state_container.is_none() {
+                self.auto_start = false;
+                self.play_test_tone();
             }
 
             // Update status
@@ -386,7 +407,8 @@ mod wasm_app {
         state_container: std::rc::Rc<std::cell::RefCell<AudioState>>,
         oscillator: Option<web_sys::OscillatorNode>,
         buffer: Option<web_sys::AudioBuffer>,
-        analyzer: Arc<Mutex<BetterAnalyzer>>,
+        left_analyzer: Arc<Mutex<BetterAnalyzer>>,
+        right_analyzer: Arc<Mutex<BetterAnalyzer>>,
         spectrogram: Arc<RwLock<BetterSpectrogram>>,
         config: AnalysisChainConfig,
     ) {
@@ -438,27 +460,26 @@ mod wasm_app {
                 None
             };
 
-            let samples: Vec<f64> = input_data_left
-                .iter()
-                .enumerate()
-                .map(|(i, &l)| {
-                    let r = input_data_right
-                        .as_ref()
-                        .and_then(|data| data.get(i).copied())
-                        .unwrap_or(l);
-                    ((l + r) * 0.5) as f64
-                })
-                .collect();
+            let right_samples: Vec<f64> = if let Some(data) = &input_data_right {
+                data.iter().map(|&v| v as f64).collect()
+            } else {
+                input_data_left.iter().map(|&v| v as f64).collect()
+            };
 
-            let mut analyzer = analyzer.lock();
-            analyzer.analyze(samples.into_iter(), None);
+            let left_samples: Vec<f64> = input_data_left.iter().map(|&v| v as f64).collect();
+
+            let mut left = left_analyzer.lock();
+            let mut right = right_analyzer.lock();
+            left.analyze(left_samples.into_iter(), None);
+            right.analyze(right_samples.into_iter(), None);
 
             let mut spectrogram = spectrogram.write();
             let chunk_duration = Duration::from_secs_f64(buffer_size as f64 / sample_rate as f64);
 
             spectrogram.update_fn(|analysis| {
-                analysis.update_mono(
-                    &analyzer,
+                analysis.update_stereo(
+                    &left,
+                    &right,
                     config.gain,
                     if config.normalize_amplitude {
                         Some(config.listening_volume)

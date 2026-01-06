@@ -24,6 +24,7 @@ mod wasm_app {
         source: Option<web_sys::AudioBufferSourceNode>,
         processor: Option<web_sys::ScriptProcessorNode>,
         oscillator: Option<web_sys::OscillatorNode>,
+        playback_start_time: Option<f64>,
         closure: Option<Closure<dyn FnMut(web_sys::AudioProcessingEvent)>>,
     }
 
@@ -230,6 +231,7 @@ mod wasm_app {
                 processor: None,
                 closure: None,
                 oscillator: None,
+                playback_start_time: None,
             }));
 
             self.audio_state_container = Some(state_container);
@@ -305,6 +307,12 @@ mod wasm_app {
 
                     if let Ok(decoded) = decoded_res {
                         let buffer: web_sys::AudioBuffer = decoded.into();
+                        log::info!(
+                            "Decoded audio: {} channels @ {}Hz, duration {:.2}s",
+                            buffer.number_of_channels(),
+                            buffer.sample_rate(),
+                            buffer.duration()
+                        );
                         start_processing(
                             container,
                             None,
@@ -358,7 +366,14 @@ mod wasm_app {
                 if self.audio_state_container.is_none() {
                     ui.centered_and_justified(|ui| {
                         ui.vertical_centered(|ui| {
-                            ui.heading("Drag and drop audio file here");
+                            ui.add_space(20.0);
+                            ui.label(
+                                egui::RichText::new("Drag and drop an audio file here")
+                                    .heading()
+                                    .size(32.0)
+                                    .strong(),
+                            );
+                            ui.add_space(12.0);
                             if ui.button("Play 440Hz Test Tone").clicked() {
                                 log::info!("Play test tone requested");
                                 self.play_test_tone();
@@ -400,6 +415,20 @@ mod wasm_app {
                     },
                 );
             });
+
+            // Always show a centered drag-and-drop hint without blocking interactions.
+            egui::Area::new("drop_hint".into())
+                .interactable(false)
+                .order(egui::Order::Foreground)
+                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    ui.label(
+                        egui::RichText::new("Drag and drop an audio file here")
+                            .heading()
+                            .size(32.0)
+                            .strong(),
+                    );
+                });
         }
     }
 
@@ -425,18 +454,23 @@ mod wasm_app {
         if let Some(buf) = buffer {
             let source = context.create_buffer_source().unwrap();
             source.set_buffer(Some(&buf));
-            let _ = source.start();
+            let start_time = context.current_time();
+            let _ = source.start_with_when(start_time);
+            state_container.borrow_mut().playback_start_time = Some(start_time);
             state_container.borrow_mut().source = Some(source.clone());
             source_node = source.into();
         } else if let Some(osc) = oscillator {
-            let _ = osc.start();
+            let start_time = context.current_time();
+            let _ = osc.start_with_when(start_time);
+            state_container.borrow_mut().playback_start_time = Some(start_time);
             state_container.borrow_mut().oscillator = Some(osc.clone());
             source_node = osc.into();
         } else {
             return;
         }
 
-        let buffer_size = 1024;
+        // A tiny buffer keeps the analysis and playback tightly in sync for WASM.
+        let buffer_size = 64;
         let processor_res = context.create_script_processor_with_buffer_size_and_number_of_input_channels_and_number_of_output_channels(
              buffer_size, 2, 2);
         if processor_res.is_err() {
@@ -450,6 +484,7 @@ mod wasm_app {
 
         let closure = Closure::wrap(Box::new(move |event: web_sys::AudioProcessingEvent| {
             let input_buffer = event.input_buffer().unwrap();
+            let frame_len = input_buffer.length() as f64;
             let channel_count = input_buffer.number_of_channels().max(1) as usize;
 
             // Mix to mono for analysis while supporting stereo pass-through.
@@ -474,7 +509,7 @@ mod wasm_app {
             right.analyze(right_samples.into_iter(), None);
 
             let mut spectrogram = spectrogram.write();
-            let chunk_duration = Duration::from_secs_f64(buffer_size as f64 / sample_rate as f64);
+            let chunk_duration = Duration::from_secs_f64(frame_len / sample_rate as f64);
 
             spectrogram.update_fn(|analysis| {
                 analysis.update_stereo(
